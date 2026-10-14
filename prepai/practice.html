@@ -20,30 +20,84 @@
     </header>
     <main class="content practice">
 
-      <div class="practice-meta">
-        <span id="qcount">Question 1</span>
-        <span class="timer" id="timer" aria-label="Elapsed time">00:00</span>
-      </div>
-      <div class="progress" role="progressbar" aria-label="Interview progress" aria-valuemin="0" aria-valuemax="100"><span id="pbar"></span></div>
-
-      <h2 class="question" id="question" aria-live="polite"></h2>
-      <p class="pause-note">Interview paused. Your timer is stopped. Select Resume when you are ready.</p>
-
-      <div class="answer">
-        <label class="sr-only" for="answer">Your answer</label>
-        <textarea id="answer" placeholder="Type your answer here, or use the microphone to record it."></textarea>
-        <div class="answer-tools">
-          <button class="mic-btn" id="mic" type="button" aria-pressed="false"><span data-icon="mic" data-size="18"></span><span class="mic-label">Record answer</span></button>
-          <div class="wave" id="wave" hidden aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
-        </div>
-        <p class="hint" id="hint" role="alert"></p>
-      </div>
-
-      <div class="practice-actions">
-        <button class="btn btn-primary" id="submit" type="button">Submit Answer</button>
+      <div id="setup" class="practice-panel">
         <div>
-          <button class="btn btn-secondary" id="pause" type="button">Pause</button>
-          <button class="btn btn-ghost" id="end" type="button">End Interview</button>
+          <h2 class="page-heading">Set Up Your Practice Interview</h2>
+          <p class="subtle">Choose a role, category and difficulty. This demo uses a small sample question bank — no AI is involved in this phase.</p>
+        </div>
+        <div class="notice">This is a demo interview. Questions and scoring shown afterwards are sample data for this project phase, not a real AI evaluation.</div>
+        <div class="group" style="border-top:0;padding-top:0">
+          <div class="field">
+            <div><label for="setupRole">Job role</label><div class="field-desc">Used to label this session.</div></div>
+            <select class="select" id="setupRole">
+              <option value="" disabled selected>Select a role</option>
+              <option>Software Engineer</option>
+              <option>Frontend Developer</option>
+              <option>Backend Developer</option>
+              <option>Data Analyst</option>
+              <option>Product Manager</option>
+              <option>QA Engineer</option>
+            </select>
+          </div>
+          <div class="field">
+            <div><label for="setupCategory">Interview category</label></div>
+            <select class="select" id="setupCategory">
+              <option value="" disabled selected>Select a category</option>
+              <option value="technical">Technical</option>
+              <option value="hr">HR</option>
+              <option value="behavioral">Behavioral</option>
+            </select>
+          </div>
+          <div class="field">
+            <div><label for="setupDifficulty">Difficulty</label></div>
+            <select class="select" id="setupDifficulty">
+              <option value="easy">Easy</option>
+              <option value="medium" selected>Medium</option>
+              <option value="hard">Hard</option>
+            </select>
+          </div>
+          <div class="field">
+            <div><label for="setupCount">Number of questions</label></div>
+            <select class="select" id="setupCount">
+              <option value="5" selected>5 questions</option>
+              <option value="10">10 questions</option>
+              <option value="15">15 questions</option>
+            </select>
+          </div>
+        </div>
+        <p class="hint" id="setupHint" role="alert"></p>
+        <div style="display:flex;justify-content:flex-end">
+          <button class="btn btn-primary" id="setupStart" type="button">Start Interview</button>
+        </div>
+      </div>
+
+      <div id="session" class="practice-panel" hidden>
+        <div class="practice-meta">
+          <span id="qcount">Question 1</span>
+          <span class="timer" id="timer" aria-label="Elapsed time">00:00</span>
+        </div>
+        <div class="progress" role="progressbar" aria-label="Interview progress" aria-valuemin="0" aria-valuemax="100"><span id="pbar"></span></div>
+
+        <h2 class="question" id="question" aria-live="polite"></h2>
+        <p class="pause-note">Interview paused. Your timer is stopped. Select Resume when you are ready.</p>
+
+        <div class="answer">
+          <label class="sr-only" for="answer">Your answer</label>
+          <textarea id="answer" placeholder="Type your answer here, or use the microphone to record it."></textarea>
+          <div class="answer-tools">
+            <button class="mic-btn" id="mic" type="button" aria-pressed="false"><span data-icon="mic" data-size="18"></span><span class="mic-label">Record answer</span></button>
+            <div class="wave" id="wave" hidden aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+          </div>
+          <p class="hint" id="hint" role="alert"></p>
+        </div>
+
+        <div class="practice-actions">
+          <div>
+            <button class="btn btn-secondary" id="prev" type="button">Previous Question</button>
+            <button class="btn btn-secondary" id="pause" type="button">Pause</button>
+            <button class="btn btn-ghost" id="end" type="button">End Interview</button>
+          </div>
+          <button class="btn btn-primary" id="submit" type="button">Next Question</button>
         </div>
       </div>
     </main>

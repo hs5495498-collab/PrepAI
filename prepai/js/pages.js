@@ -45,32 +45,57 @@
   };
 
   /* ---------------- 2. Practice interview ---------------- */
+  var CATEGORY_LABEL = { technical: 'Technical', hr: 'HR', behavioral: 'Behavioral' };
+  function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+  function demoScore(answers) {
+    // Non-AI placeholder: a simple word-count heuristic, never shown without a "demo score" label.
+    var counts = answers.map(function (a) { return (a || '').trim().split(/\s+/).filter(Boolean).length; });
+    var avg = counts.reduce(function (s, n) { return s + n; }, 0) / (counts.length || 1);
+    return Math.max(10, Math.min(99, Math.round(avg * 3)));
+  }
+
   pages.practice = function () {
     var params = new URLSearchParams(location.search);
     var settings = window.PREP_SETTINGS();
-    var count = parseInt(settings.questionCount, 10) || 5;
-    var focus = params.get('focus');
-    if (focus === 'weak') focus = P.weakest().key;
-    var skill = focus ? skillByKey(focus) : null;
-    var list = skill
-      ? P.bank.filter(function (b) { return b.skill === skill.key; }).slice(0, 3)
-      : P.mixedOrder.slice(0, count).map(function (i) { return P.bank[i]; });
+    var focusParam = params.get('focus');
+    if (focusParam === 'weak') focusParam = P.weakest().key;
+    var skill = focusParam ? skillByKey(focusParam) : null;
 
-    var i = 0, seconds = 0, paused = false, recording = false, recorded = false;
+    var setupEl = $('#setup'), sessionEl = $('#session');
     var root = $('.practice'), qcount = $('#qcount'), bar = $('#pbar'), question = $('#question'),
         answer = $('#answer'), hint = $('#hint'), mic = $('#mic'), wave = $('#wave'),
-        timer = $('#timer'), pauseBtn = $('#pause');
+        timer = $('#timer'), pauseBtn = $('#pause'), prevBtn = $('#prev'), nextBtn = $('#submit'),
+        endBtn = $('#end');
+    var setupRole = $('#setupRole'), setupCategory = $('#setupCategory'),
+        setupDifficulty = $('#setupDifficulty'), setupCount = $('#setupCount'),
+        setupHint = $('#setupHint'), setupStart = $('#setupStart');
 
     if (settings.showTimer === false) timer.hidden = true;
 
+    var list = [], meta = null, i = 0, seconds = 0, paused = false, recording = false,
+        answers = [], recordedFlags = [], tickHandle = null;
+
+    function startTimer() {
+      if (tickHandle) return;
+      tickHandle = setInterval(function () {
+        if (paused) return;
+        seconds++;
+        var m = Math.floor(seconds / 60), s = seconds % 60;
+        timer.textContent = (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+      }, 1000);
+    }
+
     function draw() {
-      qcount.textContent = 'Question ' + (i + 1) + ' of ' + list.length + (skill ? ' · Focus: ' + skill.name : '');
+      qcount.textContent = 'Question ' + (i + 1) + ' of ' + list.length +
+        (skill ? ' · Focus: ' + skill.name : meta ? ' · ' + CATEGORY_LABEL[meta.category] + ' · ' + cap(meta.difficulty) : '');
       bar.style.width = (i / list.length * 100) + '%';
       question.textContent = list[i].q;
-      answer.value = '';
+      answer.value = answers[i] || '';
       hint.textContent = '';
+      wave.dataset.used = '0';
       setRecording(false);
-      recorded = false;
+      prevBtn.disabled = i === 0;
+      nextBtn.textContent = i === list.length - 1 ? 'Finish Interview' : 'Next Question';
     }
     function setRecording(on) {
       // NOTE: this is a visual-only prototype. Connect MediaRecorder / speech-to-text here.
@@ -78,46 +103,111 @@
       mic.setAttribute('aria-pressed', on);
       $('.mic-label', mic).textContent = on ? 'Stop recording' : 'Record answer';
       wave.hidden = !on;
-      if (!on && wave.dataset.used === '1') recorded = true;
+      if (!on && wave.dataset.used === '1') recordedFlags[i] = true;
       if (on) wave.dataset.used = '1';
     }
-    function tick() {
-      if (paused) return;
-      seconds++;
-      var m = Math.floor(seconds / 60), s = seconds % 60;
-      timer.textContent = (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
-    }
-    setInterval(tick, 1000);
+    function saveCurrentAnswer() { answers[i] = answer.value; }
+    function currentValid() { return !!(answers[i] && answers[i].trim()) || !!recordedFlags[i]; }
 
     mic.addEventListener('click', function () { setRecording(!recording); });
-    $('#submit').addEventListener('click', function () {
+
+    prevBtn.addEventListener('click', function () {
+      if (i === 0) return;
       if (recording) setRecording(false);
-      if (!answer.value.trim() && !recorded) {
-        hint.textContent = 'Add a written or recorded answer before submitting.';
-        return;
-      }
-      i++;
-      if (i >= list.length) {
-        bar.style.width = '100%';
-        var c = P.completed();
-        location.href = 'results.html?id=' + c[c.length - 1].id; // prototype: opens the latest sample result
-        return;
-      }
-      wave.dataset.used = '0';
+      saveCurrentAnswer();
+      i--;
       draw();
     });
+
+    nextBtn.addEventListener('click', function () {
+      if (recording) setRecording(false);
+      saveCurrentAnswer();
+      if (!currentValid()) {
+        hint.textContent = 'Add a written or recorded answer before continuing.';
+        return;
+      }
+      if (i >= list.length - 1) { finish(); return; }
+      i++;
+      draw();
+    });
+
     pauseBtn.addEventListener('click', function () {
       paused = !paused;
       root.classList.toggle('is-paused', paused);
       pauseBtn.textContent = paused ? 'Resume' : 'Pause';
       if (paused && recording) setRecording(false);
     });
-    $('#end').addEventListener('click', function () {
-      if (window.confirm('End this interview? It will be saved as incomplete and will not receive a score.')) {
-        location.href = 'history.html';
+
+    endBtn.addEventListener('click', function () {
+      if (!window.confirm('End this interview? It will be saved as incomplete and will not receive a score.')) return;
+      saveCurrentAnswer();
+      var answeredCount = 0;
+      for (var k = 0; k < list.length; k++) {
+        if ((answers[k] && answers[k].trim()) || recordedFlags[k]) answeredCount++;
       }
+      P.addDemoAttempt({
+        type: meta ? CATEGORY_LABEL[meta.category] : (skill ? skill.name : 'Practice'),
+        status: 'incomplete',
+        answered: answeredCount,
+        total: list.length
+      });
+      location.href = 'history.html';
     });
-    draw();
+
+    function finish() {
+      if (!window.confirm('Finish the interview and view your results? You will not be able to change your answers after this.')) return;
+      var qa = list.map(function (item, idx) { return { q: item.q, a: answers[idx] || '' }; });
+      var attempt = P.addDemoAttempt({
+        type: meta ? CATEGORY_LABEL[meta.category] : (skill ? skill.name : 'Practice'),
+        status: 'completed',
+        score: demoScore(answers),
+        qa: qa
+      });
+      location.href = 'results.html?id=' + attempt.id;
+    }
+
+    function beginSession(newList, newMeta) {
+      list = newList; meta = newMeta; i = 0; seconds = 0; paused = false;
+      answers = []; recordedFlags = [];
+      setupEl.hidden = true;
+      sessionEl.hidden = false;
+      root.classList.remove('is-paused');
+      pauseBtn.textContent = 'Pause';
+      draw();
+      startTimer();
+    }
+
+    if (skill) {
+      // Existing quick skill-drill, reached via ?focus=<skill key>. Unchanged question source.
+      var skillList = P.bank.filter(function (b) { return b.skill === skill.key; }).slice(0, 3)
+        .map(function (b) { return { q: b.q }; });
+      beginSession(skillList, null);
+    } else {
+      setupEl.hidden = false;
+      sessionEl.hidden = true;
+
+      // Nice-to-have: prefill from existing Settings, without weakening validation below.
+      var savedCategory = { Technical: 'technical', Behavioral: 'behavioral' }[settings.defaultType];
+      if (savedCategory) setupCategory.value = savedCategory;
+      if (settings.questionCount === '5') setupCount.value = '5';
+      var roleOptions = Array.prototype.map.call(setupRole.options, function (o) { return o.value; });
+      if (settings.role && roleOptions.indexOf(settings.role) > -1) setupRole.value = settings.role;
+
+      setupStart.addEventListener('click', function () {
+        var role = setupRole.value, category = setupCategory.value,
+            difficulty = setupDifficulty.value, count = parseInt(setupCount.value, 10);
+        if (!role || !category) {
+          setupHint.textContent = 'Select a job role and an interview category to continue.';
+          return;
+        }
+        setupHint.textContent = '';
+        var pool = (P.demoQuestions[category] || []).filter(function (q) { return q.d === difficulty; });
+        if (!pool.length) pool = P.demoQuestions[category] || [];
+        var picked = [];
+        for (var k = 0; k < count && pool.length; k++) picked.push({ q: pool[k % pool.length].q });
+        beginSession(picked, { role: role, category: category, difficulty: difficulty });
+      });
+    }
   };
 
   /* ---------------- 3. Interview history ---------------- */
@@ -285,18 +375,31 @@
       var cmp = prev
         ? '<span class="' + (ch >= 0 ? 'pos' : 'neg') + '">' + (ch === 0 ? 'No change' : signed(ch) + ' points') + '</span> compared with your previous attempt (' + P.fmt(prev.date, true) + ', ' + prev.score + ')'
         : 'This was your first completed attempt.';
-      out += '<div class="score-row"><div class="big-score">' + a.score + '<span>/ 100</span></div>' +
-        '<div class="score-meta">' + resultHTML(a) + '<p>' + cmp + '</p></div></div>' +
-        '<div class="two-col"><div><h3 class="section-title">Strengths</h3><ul class="bullets">' +
-        d.strengths.map(function (t) { return '<li>' + t + '</li>'; }).join('') + '</ul></div>' +
-        '<div><h3 class="section-title">Areas to improve</h3><ul class="bullets">' +
-        d.improvements.map(function (t) { return '<li>' + t + '</li>'; }).join('') + '</ul></div></div>' +
-        '<div><h3 class="section-title">Question-by-question feedback</h3><div class="qa-list">' +
-        d.questions.map(function (q, i) {
-          return '<details class="qa"><summary><span class="muted">Q' + (i + 1) + '</span><span class="row-title">' + esc(q.q) +
-            '</span><strong>' + q.score + '</strong><span class="chev">' + icon('chevron', 16) + '</span></summary>' +
-            '<div class="qa-body">' + esc(q.fb) + '</div></details>';
-        }).join('') + '</div></div>';
+      if (d) {
+        out += '<div class="score-row"><div class="big-score">' + a.score + '<span>/ 100</span></div>' +
+          '<div class="score-meta">' + resultHTML(a) + '<p>' + cmp + '</p></div></div>' +
+          '<div class="two-col"><div><h3 class="section-title">Strengths</h3><ul class="bullets">' +
+          d.strengths.map(function (t) { return '<li>' + t + '</li>'; }).join('') + '</ul></div>' +
+          '<div><h3 class="section-title">Areas to improve</h3><ul class="bullets">' +
+          d.improvements.map(function (t) { return '<li>' + t + '</li>'; }).join('') + '</ul></div></div>' +
+          '<div><h3 class="section-title">Question-by-question feedback</h3><div class="qa-list">' +
+          d.questions.map(function (q, i) {
+            return '<details class="qa"><summary><span class="muted">Q' + (i + 1) + '</span><span class="row-title">' + esc(q.q) +
+              '</span><strong>' + q.score + '</strong><span class="chev">' + icon('chevron', 16) + '</span></summary>' +
+              '<div class="qa-body">' + esc(q.fb) + '</div></details>';
+          }).join('') + '</div></div>';
+      } else {
+        // A Phase 3 demo attempt: show the real questions/answers and a clearly labeled, non-AI demo score.
+        out += '<div class="notice">This result uses a sample/demo score — a simple word-count heuristic for this prototype phase, not an AI evaluation of your answers.</div>' +
+          '<div class="score-row"><div class="big-score">' + a.score + '<span>/ 100 (demo)</span></div>' +
+          '<div class="score-meta">' + resultHTML(a) + '<p>' + cmp + '</p></div></div>' +
+          '<div><h3 class="section-title">Your Answers (Demo Submission)</h3><div class="qa-list">' +
+          (a.qa || []).map(function (q, i) {
+            return '<details class="qa"><summary><span class="muted">Q' + (i + 1) + '</span><span class="row-title">' + esc(q.q) +
+              '</span><span></span><span class="chev">' + icon('chevron', 16) + '</span></summary>' +
+              '<div class="qa-body">' + (q.a && q.a.trim() ? esc(q.a) : '<em>No answer submitted.</em>') + '</div></details>';
+          }).join('') + '</div></div>';
+      }
     }
     out += '<div class="actions"><a class="btn btn-primary" href="practice.html?focus=weak">Practise Weak Areas</a>' +
       '<a class="btn btn-secondary" href="history.html">Back to Interview History</a></div>';

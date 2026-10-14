@@ -31,6 +31,7 @@ svg.icon { stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: 
 .muted { color: var(--muted); }
 .pos { color: var(--success); }
 .neg { color: var(--danger); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 /* ---------- Sidebar ---------- */
 .sidebar {
@@ -207,9 +208,12 @@ details.qa .qa-body { padding: 0 0 20px 44px; color: var(--muted); }
 .wave span:nth-child(5n) { animation-delay: .45s; }
 @keyframes wave { 0%, 100% { height: 5px; } 50% { height: 22px; } }
 .hint { color: var(--danger); font-size: .8125rem; min-height: 1.2em; }
+.practice-panel { display: flex; flex-direction: column; gap: 28px; }
 .practice-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.practice-actions > div { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
 .pause-note { display: none; text-align: center; padding: 56px 0; color: var(--muted); }
-.practice.is-paused .question, .practice.is-paused .answer, .practice.is-paused #submit { display: none; }
+.practice.is-paused .question, .practice.is-paused .answer, .practice.is-paused #submit, .practice.is-paused #prev { display: none; }
 .practice.is-paused .pause-note { display: block; }
 
 /* ---------- Settings ---------- */

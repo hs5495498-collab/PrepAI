@@ -15,6 +15,11 @@
     var d = typeof v === 'string' ? parse(v) : v;
     return d.getDate() + ' ' + MONTHS[d.getMonth()] + (withYear ? ' ' + d.getFullYear() : '');
   }
+  function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+  function isoToday() {
+    var d = new Date();
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+  }
 
   var P = { passMark: 60, fmt: fmt, parse: parse };
 
@@ -31,6 +36,82 @@
   ];
   P.attempts.forEach(function (a) { a.d = parse(a.date); });
   P.ref = P.attempts[P.attempts.length - 1].d; // date filters count back from the latest attempt
+
+  /* ---------- Demo attempts created from the Phase 3 practice workflow ----------
+     Stored in localStorage under 'prepai.demoAttempts'. These are real attempts the
+     candidate just completed in this prototype (real questions, real typed answers),
+     but any score shown for them is a simple non-AI heuristic, never fabricated feedback.
+     Loading is defensive: anything malformed or missing required fields is dropped
+     instead of crashing or corrupting the original sample attempts above. */
+  function isValidDemoAttempt(a) {
+    if (!a || typeof a !== 'object') return false;
+    if (typeof a.id !== 'string' || a.id.indexOf('demo-') !== 0) return false;
+    if (typeof a.date !== 'string' || isNaN(parse(a.date).getTime())) return false;
+    if (typeof a.type !== 'string' || !a.type) return false;
+    if (a.status === 'completed') {
+      return typeof a.score === 'number' && a.score >= 0 && a.score <= 100 && Array.isArray(a.qa);
+    }
+    if (a.status === 'incomplete') {
+      return typeof a.answered === 'number' && typeof a.total === 'number';
+    }
+    return false;
+  }
+  function loadDemoAttempts() {
+    var raw;
+    try { raw = JSON.parse(localStorage.getItem('prepai.demoAttempts')); } catch (e) { return; }
+    if (!Array.isArray(raw)) return;
+    raw.forEach(function (a) {
+      if (!isValidDemoAttempt(a)) return; // silently skip corrupted/foreign entries
+      var attempt = { id: a.id, date: a.date, d: parse(a.date), type: a.type, status: a.status };
+      if (a.status === 'completed') {
+        attempt.score = a.score;
+        attempt.qa = a.qa;
+      } else {
+        attempt.score = null;
+        attempt.answered = a.answered;
+        attempt.total = a.total;
+      }
+      P.attempts.push(attempt);
+    });
+    if (P.attempts.length) P.ref = P.attempts[P.attempts.length - 1].d;
+  }
+  function persistDemoAttempts() {
+    try {
+      var toSave = P.attempts.filter(function (a) { return typeof a.id === 'string' && a.id.indexOf('demo-') === 0; })
+        .map(function (a) {
+          var out = { id: a.id, date: a.date, type: a.type, status: a.status };
+          if (a.status === 'completed') { out.score = a.score; out.qa = a.qa; }
+          else { out.answered = a.answered; out.total = a.total; }
+          return out;
+        });
+      localStorage.setItem('prepai.demoAttempts', JSON.stringify(toSave));
+    } catch (e) { /* storage unavailable */ }
+  }
+  loadDemoAttempts();
+
+  /* Creates and persists one new demo attempt, returns it (with its id) so the
+     caller can redirect straight to its own results page. */
+  P.addDemoAttempt = function (partial) {
+    var attempt = {
+      id: 'demo-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+      date: isoToday(),
+      type: partial.type || 'Practice',
+      status: partial.status
+    };
+    attempt.d = parse(attempt.date);
+    if (attempt.status === 'completed') {
+      attempt.score = partial.score;
+      attempt.qa = partial.qa || [];
+    } else {
+      attempt.score = null;
+      attempt.answered = partial.answered || 0;
+      attempt.total = partial.total || 0;
+    }
+    P.attempts.push(attempt);
+    P.ref = attempt.d;
+    persistDemoAttempts();
+    return attempt;
+  };
 
   P.completed = function () {
     return P.attempts.filter(function (a) { return a.status === 'completed'; })
@@ -178,6 +259,38 @@
     { skill: 'problem',       q: 'You inherit code with no tests. How do you start making changes safely?' }
   ];
   P.mixedOrder = [0, 1, 2, 3, 4, 5, 6, 7];
+
+  /* ---------- Phase 3 demo interview question bank ----------
+     Deliberately small (6 per category) and clearly sample data. Each category
+     gives 2 questions per difficulty; if more questions are requested than exist
+     for that difficulty, the practice session cycles through them again rather
+     than inventing new ones. */
+  P.demoQuestions = {
+    technical: [
+      { d: 'easy',   q: 'What is the difference between a list/array and a tuple, and when would you use each?' },
+      { d: 'easy',   q: 'What does API stand for, and what problem does it solve?' },
+      { d: 'medium', q: 'Explain the difference between == and === (or similar value vs strict equality) in a language you know.' },
+      { d: 'medium', q: 'What is a database index, and why does it speed up queries?' },
+      { d: 'hard',   q: 'How would you design a simple rate limiter for an API?' },
+      { d: 'hard',   q: 'Explain how a hash table resolves collisions.' }
+    ],
+    hr: [
+      { d: 'easy',   q: 'Tell me about yourself.' },
+      { d: 'easy',   q: 'Why do you want to work here?' },
+      { d: 'medium', q: 'What are your greatest strengths and weaknesses?' },
+      { d: 'medium', q: 'Where do you see yourself in five years?' },
+      { d: 'hard',   q: 'Why should we hire you over other candidates?' },
+      { d: 'hard',   q: 'Describe a time you received difficult feedback. How did you respond?' }
+    ],
+    behavioral: [
+      { d: 'easy',   q: 'Describe a time you worked as part of a team.' },
+      { d: 'easy',   q: 'Tell me about a goal you set and how you achieved it.' },
+      { d: 'medium', q: 'Tell me about a time you disagreed with a teammate and how you resolved it.' },
+      { d: 'medium', q: 'Describe a situation where you had to meet a tight deadline.' },
+      { d: 'hard',   q: 'Tell me about a time you failed. What did you learn?' },
+      { d: 'hard',   q: 'Describe a time you had to persuade someone who disagreed with you.' }
+    ]
+  };
 
   window.PREP = P;
 })();
