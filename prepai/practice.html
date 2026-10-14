@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Practice Interview – PrepAI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body data-page="practice" data-nav="practice.html">
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn menu-btn" type="button" id="menu-btn" aria-label="Open menu" aria-controls="sidebar" data-icon="menu"></button>
+      <h1 class="topbar-title">Practice Interview</h1>
+      <div class="topbar-tools"></div>
+      <a class="icon-btn account-btn" href="settings.html" aria-label="Account and settings" title="Account and settings" data-icon="settings"></a>
+    </header>
+    <main class="content practice">
+
+      <div class="practice-meta">
+        <span id="qcount">Question 1</span>
+        <span class="timer" id="timer" aria-label="Elapsed time">00:00</span>
+      </div>
+      <div class="progress" role="progressbar" aria-label="Interview progress" aria-valuemin="0" aria-valuemax="100"><span id="pbar"></span></div>
+
+      <h2 class="question" id="question" aria-live="polite"></h2>
+      <p class="pause-note">Interview paused. Your timer is stopped. Select Resume when you are ready.</p>
+
+      <div class="answer">
+        <label class="sr-only" for="answer">Your answer</label>
+        <textarea id="answer" placeholder="Type your answer here, or use the microphone to record it."></textarea>
+        <div class="answer-tools">
+          <button class="mic-btn" id="mic" type="button" aria-pressed="false"><span data-icon="mic" data-size="18"></span><span class="mic-label">Record answer</span></button>
+          <div class="wave" id="wave" hidden aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+        </div>
+        <p class="hint" id="hint" role="alert"></p>
+      </div>
+
+      <div class="practice-actions">
+        <button class="btn btn-primary" id="submit" type="button">Submit Answer</button>
+        <div>
+          <button class="btn btn-secondary" id="pause" type="button">Pause</button>
+          <button class="btn btn-ghost" id="end" type="button">End Interview</button>
+        </div>
+      </div>
+    </main>
+  </div>
+  <script src="js/icons.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/chart.js"></script>
+  <script src="js/pages.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Progress Analytics – PrepAI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body data-page="analytics" data-nav="analytics.html">
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn menu-btn" type="button" id="menu-btn" aria-label="Open menu" aria-controls="sidebar" data-icon="menu"></button>
+      <h1 class="topbar-title">Progress Analytics</h1>
+      <div class="topbar-tools"><div class="seg" id="range" role="group" aria-label="Date range">
+          <button type="button" data-range="30" aria-pressed="false">30 Days</button>
+          <button type="button" data-range="90" aria-pressed="false">90 Days</button>
+          <button type="button" data-range="all" aria-pressed="true">All Time</button>
+        </div></div>
+      <a class="icon-btn account-btn" href="settings.html" aria-label="Account and settings" title="Account and settings" data-icon="settings"></a>
+    </header>
+    <main class="content">
+
+      <section class="metrics" id="metrics" aria-label="Summary"></section>
+
+      <section>
+        <h3 class="section-title" style="margin-bottom:12px">Interview Performance Over Time</h3>
+        <div id="chart"></div>
+        <div class="legend" aria-label="Chart key">
+          <span><svg width="22" height="10" aria-hidden="true"><line x1="0" y1="5" x2="22" y2="5" stroke="#4169E1" stroke-width="2.25"/><circle cx="11" cy="5" r="3.5" fill="#fff" stroke="#4169E1" stroke-width="2"/></svg>Completed interview score</span>
+          <span><svg width="22" height="10" aria-hidden="true"><line x1="0" y1="5" x2="22" y2="5" stroke="#98A2B3" stroke-width="1.5" stroke-dasharray="4 4"/></svg>Trend</span>
+          <span><svg width="12" height="12" aria-hidden="true"><path d="M6 0L12 6L6 12L0 6Z" fill="#16A36A"/></svg>Achievement unlocked</span>
+          <span><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="4.5" fill="#fff" stroke="#98A2B3" stroke-width="1.5"/></svg>Missed interview (no score)</span>
+        </div>
+        <p class="summary-line" id="summary"></p>
+      </section>
+
+      <section class="two-col">
+        <div>
+          <h3 class="section-title">What Improved?</h3>
+          <ul class="plain-list" id="improved"></ul>
+        </div>
+        <div>
+          <h3 class="section-title">What to Focus On Next</h3>
+          <ul class="plain-list" id="focus"></ul>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="js/icons.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/chart.js"></script>
+  <script src="js/pages.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

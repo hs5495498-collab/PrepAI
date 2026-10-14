@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard – PrepAI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body data-page="dashboard" data-nav="index.html">
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn menu-btn" type="button" id="menu-btn" aria-label="Open menu" aria-controls="sidebar" data-icon="menu"></button>
+      <h1 class="topbar-title">Dashboard</h1>
+      <div class="topbar-tools"></div>
+      <a class="icon-btn account-btn" href="settings.html" aria-label="Account and settings" title="Account and settings" data-icon="settings"></a>
+    </header>
+    <main class="content">
+
+      <section class="hero">
+        <div>
+          <h2 class="page-heading">Your Interview Journey</h2>
+          <p class="subtle">Build confidence with every attempt.</p>
+        </div>
+        <a class="btn btn-primary" href="practice.html">Start New Interview</a>
+      </section>
+
+      <section class="metrics" id="metrics" aria-label="Summary"></section>
+
+      <section class="split">
+        <div>
+          <h3 class="section-title">Performance Overview</h3>
+          <div id="chart"></div>
+        </div>
+        <aside class="reco">
+          <span class="eyebrow">Recommended Next Step</span>
+          <p class="reco-text" id="reco-text"></p>
+          <a class="btn btn-outline btn-block" id="reco-btn" href="practice.html">Practice This Skill</a>
+        </aside>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h3 class="section-title">Recent Interviews</h3>
+          <a class="link" href="history.html">View All</a>
+        </div>
+        <div class="list" id="recent"></div>
+      </section>
+    </main>
+  </div>
+  <script src="js/icons.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/chart.js"></script>
+  <script src="js/pages.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

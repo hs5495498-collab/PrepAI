@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Settings – PrepAI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body data-page="settings" data-nav="settings.html">
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn menu-btn" type="button" id="menu-btn" aria-label="Open menu" aria-controls="sidebar" data-icon="menu"></button>
+      <h1 class="topbar-title">Settings</h1>
+      <div class="topbar-tools"></div>
+      <a class="icon-btn account-btn" href="settings.html" aria-label="Account and settings" title="Account and settings" data-icon="settings"></a>
+    </header>
+    <main class="content">
+
+      <form id="settings-form" style="display:flex;flex-direction:column;gap:40px">
+        <section class="group" style="border-top:0;padding-top:0">
+          <h3>Interview preferences</h3>
+          <div class="field "><div><label for="defaultType">Default interview type</label><div class="field-desc">Used when you start a new interview.</div></div><select class="select" id="defaultType" name="defaultType"><option value="Technical">Technical</option><option value="Behavioral">Behavioral</option><option value="Mixed">Mixed</option></select></div>
+          <div class="field "><div><label for="questionCount">Questions per interview</label></div><select class="select" id="questionCount" name="questionCount"><option value="3">3 questions</option><option value="5">5 questions</option><option value="8">8 questions</option></select></div>
+          <div class="field toggle"><div><label for="showTimer">Show interview timer</label><div class="field-desc">Display elapsed time while you answer.</div></div><span class="switch"><input id="showTimer" name="showTimer" type="checkbox"></span></div>
+        </section>
+        <section class="group">
+          <h3>Target role</h3>
+          <div class="field "><div><label for="role">Role</label><div class="field-desc">The job you are preparing for.</div></div><input class="input" id="role" name="role" type="text"></div>
+          <div class="field "><div><label for="level">Experience level</label></div><select class="select" id="level" name="level"><option value="Entry level">Entry level</option><option value="Mid-level">Mid-level</option><option value="Senior">Senior</option><option value="Lead">Lead</option></select></div>
+        </section>
+        <section class="group">
+          <h3>Audio</h3>
+          <div class="field "><div><label for="answerMode">Preferred answer mode</label></div><select class="select" id="answerMode" name="answerMode"><option value="Text">Text</option><option value="Voice">Voice</option></select></div>
+          <div class="field toggle"><div><label for="readAloud">Read questions aloud</label><div class="field-desc">Play each question as audio.</div></div><span class="switch"><input id="readAloud" name="readAloud" type="checkbox"></span></div>
+        </section>
+        <section class="group">
+          <h3>Notifications</h3>
+          <div class="field toggle"><div><label for="remind">Practice reminders</label></div><span class="switch"><input id="remind" name="remind" type="checkbox"></span></div>
+          <div class="field "><div><label for="remindFreq">Reminder frequency</label></div><select class="select" id="remindFreq" name="remindFreq"><option value="Daily">Daily</option><option value="Weekly">Weekly</option><option value="Monthly">Monthly</option></select></div>
+          <div class="field toggle"><div><label for="weeklySummary">Weekly progress summary</label><div class="field-desc">Receive a short email each week.</div></div><span class="switch"><input id="weeklySummary" name="weeklySummary" type="checkbox"></span></div>
+        </section>
+        <section class="group">
+          <h3>Privacy</h3>
+          <div class="field toggle"><div><label for="saveRecordings">Save audio recordings</label><div class="field-desc">Keep recordings so you can listen back.</div></div><span class="switch"><input id="saveRecordings" name="saveRecordings" type="checkbox"></span></div>
+          <div class="field toggle"><div><label for="shareUsage">Share anonymous usage data</label><div class="field-desc">Helps improve PrepAI.</div></div><span class="switch"><input id="shareUsage" name="shareUsage" type="checkbox"></span></div>
+        </section>
+        <section class="group">
+          <h3>Accessibility</h3>
+          <div class="field "><div><label for="textSize">Text size</label></div><select class="select" id="textSize" name="textSize"><option value="default">Default</option><option value="large">Large</option><option value="larger">Larger</option></select></div>
+          <div class="field toggle"><div><label for="reduceMotion">Reduce motion</label><div class="field-desc">Turn off animations.</div></div><span class="switch"><input id="reduceMotion" name="reduceMotion" type="checkbox"></span></div>
+        </section>
+        <div class="save-row">
+          <button class="btn btn-primary" type="submit">Save Changes</button>
+          <span class="saved-msg" id="saved" hidden role="status">Settings saved</span>
+        </div>
+      </form>
+    </main>
+  </div>
+  <script src="js/icons.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/chart.js"></script>
+  <script src="js/pages.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
