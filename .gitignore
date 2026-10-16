@@ -1,0 +1,15 @@
+# Python
+backend/.venv/
+backend/venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Environment secrets
+.env
+*.env
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db

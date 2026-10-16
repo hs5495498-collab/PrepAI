@@ -225,6 +225,12 @@ details.qa .qa-body { padding: 0 0 20px 44px; color: var(--muted); }
 .field .select, .field .input { width: 220px; }
 .save-row { display: flex; align-items: center; gap: 16px; }
 .saved-msg { color: var(--success); font-size: .875rem; }
+#backend-status { display: flex; align-items: center; gap: 10px; }
+#backend-status .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+#backend-status.is-ok .status-dot { background: var(--success); }
+#backend-status.is-down .status-dot { background: var(--danger); }
+#backend-status.is-ok { color: var(--success); }
+#backend-status.is-down { color: var(--danger); }
 
 /* ---------- Responsive ---------- */
 @media (max-width: 1024px) {

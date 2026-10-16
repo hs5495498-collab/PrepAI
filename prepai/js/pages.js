@@ -412,7 +412,31 @@
     answerMode: 'Text', readAloud: false, remind: true, remindFreq: 'Weekly', weeklySummary: true,
     saveRecordings: false, shareUsage: false, textSize: 'default', reduceMotion: false
   };
+  function checkBackendStatus() {
+    var box = $('#backend-status'), text = $('#backend-status-text');
+    if (!box || !text) return;
+    var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timeout = ctrl && setTimeout(function () { ctrl.abort(); }, 3000);
+    fetch('http://127.0.0.1:8000/health', ctrl ? { signal: ctrl.signal } : {})
+      .then(function (res) {
+        clearTimeout(timeout);
+        if (!res.ok) throw new Error('unexpected status ' + res.status);
+        return res.json();
+      })
+      .then(function (data) {
+        var ok = data && data.status === 'ok';
+        box.className = 'notice ' + (ok ? 'is-ok' : 'is-down');
+        text.textContent = ok ? 'Backend connected' : 'Backend unavailable';
+      })
+      .catch(function () {
+        clearTimeout(timeout);
+        box.className = 'notice is-down';
+        text.textContent = 'Backend unavailable';
+      });
+  }
+
   pages.settings = function () {
+    checkBackendStatus();
     var saved = Object.assign({}, DEFAULTS, window.PREP_SETTINGS());
     var form = $('#settings-form');
     Object.keys(DEFAULTS).forEach(function (k) {
