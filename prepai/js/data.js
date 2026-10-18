@@ -56,6 +56,11 @@
     }
     return false;
   }
+  /* source tells the results page whether a completed attempt's answers were
+     actually sent to the FastAPI backend ('backend') or stayed entirely in
+     this browser ('offline') - defaults to 'offline' for attempts saved
+     before this field existed, so old localStorage data keeps working. */
+  function normalizeSource(a) { return a.source === 'backend' ? 'backend' : 'offline'; }
   function loadDemoAttempts() {
     var raw;
     try { raw = JSON.parse(localStorage.getItem('prepai.demoAttempts')); } catch (e) { return; }
@@ -66,6 +71,7 @@
       if (a.status === 'completed') {
         attempt.score = a.score;
         attempt.qa = a.qa;
+        attempt.source = normalizeSource(a);
       } else {
         attempt.score = null;
         attempt.answered = a.answered;
@@ -80,7 +86,7 @@
       var toSave = P.attempts.filter(function (a) { return typeof a.id === 'string' && a.id.indexOf('demo-') === 0; })
         .map(function (a) {
           var out = { id: a.id, date: a.date, type: a.type, status: a.status };
-          if (a.status === 'completed') { out.score = a.score; out.qa = a.qa; }
+          if (a.status === 'completed') { out.score = a.score; out.qa = a.qa; out.source = normalizeSource(a); }
           else { out.answered = a.answered; out.total = a.total; }
           return out;
         });
@@ -102,6 +108,7 @@
     if (attempt.status === 'completed') {
       attempt.score = partial.score;
       attempt.qa = partial.qa || [];
+      attempt.source = partial.source === 'backend' ? 'backend' : 'offline';
     } else {
       attempt.score = null;
       attempt.answered = partial.answered || 0;

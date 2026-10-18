@@ -66,7 +66,8 @@
           </div>
         </div>
         <p class="hint" id="setupHint" role="alert"></p>
-        <div style="display:flex;justify-content:flex-end">
+        <div style="display:flex;justify-content:flex-end;gap:12px">
+          <button class="btn btn-secondary" id="setupOfflineStart" type="button" hidden>Continue in Offline Demo Mode</button>
           <button class="btn btn-primary" id="setupStart" type="button">Start Interview</button>
         </div>
       </div>
@@ -74,6 +75,7 @@
       <div id="session" class="practice-panel" hidden>
         <div class="practice-meta">
           <span id="qcount">Question 1</span>
+          <span class="muted" id="sessionMode"></span>
           <span class="timer" id="timer" aria-label="Elapsed time">00:00</span>
         </div>
         <div class="progress" role="progressbar" aria-label="Interview progress" aria-valuemin="0" aria-valuemax="100"><span id="pbar"></span></div>
@@ -105,6 +107,7 @@
   <script src="js/icons.js"></script>
   <script src="js/data.js"></script>
   <script src="js/chart.js"></script>
+  <script src="js/api.js"></script>
   <script src="js/pages.js"></script>
   <script src="js/app.js"></script>
 </body>

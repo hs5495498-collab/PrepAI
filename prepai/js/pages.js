@@ -47,6 +47,14 @@
   /* ---------------- 2. Practice interview ---------------- */
   var CATEGORY_LABEL = { technical: 'Technical', hr: 'HR', behavioral: 'Behavioral' };
   function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+  function formatApiError(data) {
+    if (!data || data.detail == null) return null;
+    if (typeof data.detail === 'string') return data.detail;
+    if (Array.isArray(data.detail)) {
+      return data.detail.map(function (e) { return (e && e.msg) || JSON.stringify(e); }).join('; ');
+    }
+    return JSON.stringify(data.detail);
+  }
   function demoScore(answers) {
     // Non-AI placeholder: a simple word-count heuristic, never shown without a "demo score" label.
     var counts = answers.map(function (a) { return (a || '').trim().split(/\s+/).filter(Boolean).length; });
@@ -62,18 +70,19 @@
     var skill = focusParam ? skillByKey(focusParam) : null;
 
     var setupEl = $('#setup'), sessionEl = $('#session');
-    var root = $('.practice'), qcount = $('#qcount'), bar = $('#pbar'), question = $('#question'),
-        answer = $('#answer'), hint = $('#hint'), mic = $('#mic'), wave = $('#wave'),
+    var root = $('.practice'), qcount = $('#qcount'), sessionMode = $('#sessionMode'), bar = $('#pbar'),
+        question = $('#question'), answer = $('#answer'), hint = $('#hint'), mic = $('#mic'), wave = $('#wave'),
         timer = $('#timer'), pauseBtn = $('#pause'), prevBtn = $('#prev'), nextBtn = $('#submit'),
         endBtn = $('#end');
     var setupRole = $('#setupRole'), setupCategory = $('#setupCategory'),
         setupDifficulty = $('#setupDifficulty'), setupCount = $('#setupCount'),
-        setupHint = $('#setupHint'), setupStart = $('#setupStart');
+        setupHint = $('#setupHint'), setupStart = $('#setupStart'), setupOfflineStart = $('#setupOfflineStart');
 
     if (settings.showTimer === false) timer.hidden = true;
 
     var list = [], meta = null, i = 0, seconds = 0, paused = false, recording = false,
-        answers = [], recordedFlags = [], tickHandle = null;
+        answers = [], recordedFlags = [], tickHandle = null,
+        backendId = null, submittedToBackend = [], creating = false, submitting = false;
 
     function startTimer() {
       if (tickHandle) return;
@@ -91,10 +100,14 @@
       bar.style.width = (i / list.length * 100) + '%';
       question.textContent = list[i].q;
       answer.value = answers[i] || '';
-      hint.textContent = '';
+      var locked = !!submittedToBackend[i];
+      answer.disabled = locked;
+      mic.disabled = locked;
+      hint.textContent = locked ? 'This answer was already submitted to the server and can’t be changed.' : '';
       wave.dataset.used = '0';
       setRecording(false);
-      prevBtn.disabled = i === 0;
+      prevBtn.disabled = i === 0 || submitting;
+      nextBtn.disabled = submitting;
       nextBtn.textContent = i === list.length - 1 ? 'Finish Interview' : 'Next Question';
     }
     function setRecording(on) {
@@ -106,13 +119,25 @@
       if (!on && wave.dataset.used === '1') recordedFlags[i] = true;
       if (on) wave.dataset.used = '1';
     }
-    function saveCurrentAnswer() { answers[i] = answer.value; }
+    function saveCurrentAnswer() { if (!submittedToBackend[i]) answers[i] = answer.value; }
     function currentValid() { return !!(answers[i] && answers[i].trim()) || !!recordedFlags[i]; }
+    function setBusy(busy, message) {
+      submitting = busy;
+      nextBtn.disabled = busy;
+      prevBtn.disabled = busy || i === 0;
+      endBtn.disabled = busy;
+      hint.textContent = message || '';
+    }
+    function advanceOrFinish() {
+      if (i >= list.length - 1) { finish(); return; }
+      i++;
+      draw();
+    }
 
     mic.addEventListener('click', function () { setRecording(!recording); });
 
     prevBtn.addEventListener('click', function () {
-      if (i === 0) return;
+      if (i === 0 || submitting) return;
       if (recording) setRecording(false);
       saveCurrentAnswer();
       i--;
@@ -120,15 +145,44 @@
     });
 
     nextBtn.addEventListener('click', function () {
+      if (submitting) return;
       if (recording) setRecording(false);
       saveCurrentAnswer();
       if (!currentValid()) {
         hint.textContent = 'Add a written or recorded answer before continuing.';
         return;
       }
-      if (i >= list.length - 1) { finish(); return; }
-      i++;
-      draw();
+      if (!backendId || submittedToBackend[i]) {
+        advanceOrFinish();
+        return;
+      }
+      setBusy(true, 'Saving your answer…');
+      window.PREP_API.submitAnswer(backendId, { question_id: list[i].id, answer: answers[i] })
+        .then(function (res) {
+          if (res.ok || res.status === 409) {
+            // 409 means the backend already has this answer recorded (e.g. a repeated
+            // click) - safe to treat as submitted and continue, not an error.
+            submittedToBackend[i] = true;
+            setBusy(false);
+            advanceOrFinish();
+            return;
+          }
+          if (res.status === 404) {
+            // In-memory backend session is gone (e.g. the server restarted). Keep the
+            // candidate moving locally instead of losing their progress.
+            backendId = null;
+            setBusy(false, 'Your interview session expired on the server (sessions are not saved permanently yet). Continuing on this device only.');
+            advanceOrFinish();
+            return;
+          }
+          if (res.status === 0) {
+            backendId = null;
+            setBusy(false, 'Lost connection to the interview server. Continuing on this device only.');
+            advanceOrFinish();
+            return;
+          }
+          setBusy(false, formatApiError(res.data) || 'The server rejected this answer. Please try again.');
+        });
     });
 
     pauseBtn.addEventListener('click', function () {
@@ -154,27 +208,70 @@
       location.href = 'history.html';
     });
 
-    function finish() {
-      if (!window.confirm('Finish the interview and view your results? You will not be able to change your answers after this.')) return;
+    function finishOffline() {
       var qa = list.map(function (item, idx) { return { q: item.q, a: answers[idx] || '' }; });
       var attempt = P.addDemoAttempt({
         type: meta ? CATEGORY_LABEL[meta.category] : (skill ? skill.name : 'Practice'),
         status: 'completed',
         score: demoScore(answers),
-        qa: qa
+        qa: qa,
+        source: 'offline'
       });
       location.href = 'results.html?id=' + attempt.id;
     }
 
-    function beginSession(newList, newMeta) {
+    function finishFromBackend(data) {
+      var qa = (data.questions || []).map(function (item) { return { q: item.text, a: item.answer || '' }; });
+      var attempt = P.addDemoAttempt({
+        type: meta ? CATEGORY_LABEL[meta.category] : 'Practice',
+        status: 'completed',
+        score: demoScore(qa.map(function (x) { return x.a; })),
+        qa: qa,
+        source: 'backend'
+      });
+      location.href = 'results.html?id=' + attempt.id;
+    }
+
+    function finish() {
+      if (!window.confirm('Finish the interview and view your results? You will not be able to change your answers after this.')) return;
+      if (!backendId) { finishOffline(); return; }
+      setBusy(true, 'Finishing your interview…');
+      window.PREP_API.completeInterview(backendId).then(function (res) {
+        if (res.ok) { finishFromBackend(res.data); return; }
+        // Already completed (a rare double-submit race), expired, or unreachable:
+        // fall back to a locally-saved result instead of losing the candidate's answers.
+        finishOffline();
+      });
+    }
+
+    function beginSession(newList, newMeta, backendSessionId) {
       list = newList; meta = newMeta; i = 0; seconds = 0; paused = false;
-      answers = []; recordedFlags = [];
+      answers = []; recordedFlags = []; submittedToBackend = [];
+      backendId = backendSessionId || null;
+      if (sessionMode) sessionMode.textContent = skill ? '' : (backendId ? '· Live backend session' : '· Offline demo (not saved to server)');
       setupEl.hidden = true;
       sessionEl.hidden = false;
       root.classList.remove('is-paused');
       pauseBtn.textContent = 'Pause';
       draw();
       startTimer();
+    }
+
+    function startOfflineInterview(role, category, difficulty, count) {
+      var pool = (P.demoQuestions[category] || []).filter(function (q) { return q.d === difficulty; });
+      if (!pool.length) pool = P.demoQuestions[category] || [];
+      var picked = [];
+      for (var k = 0; k < count && pool.length; k++) picked.push({ q: pool[k % pool.length].q });
+      beginSession(picked, { role: role, category: category, difficulty: difficulty }, null);
+    }
+
+    function showCreateError(res) {
+      var msg;
+      if (res.status === 0) msg = 'Could not reach the interview server at ' + window.PREP_API.baseUrl + '. Make sure the backend is running.';
+      else if (res.status === 422) msg = 'The server rejected this request: ' + (formatApiError(res.data) || 'invalid input.');
+      else msg = 'The interview server returned an unexpected error (status ' + res.status + ').';
+      setupHint.textContent = msg;
+      if (setupOfflineStart) setupOfflineStart.hidden = false;
     }
 
     if (skill) {
@@ -194,6 +291,7 @@
       if (settings.role && roleOptions.indexOf(settings.role) > -1) setupRole.value = settings.role;
 
       setupStart.addEventListener('click', function () {
+        if (creating) return;
         var role = setupRole.value, category = setupCategory.value,
             difficulty = setupDifficulty.value, count = parseInt(setupCount.value, 10);
         if (!role || !category) {
@@ -201,12 +299,35 @@
           return;
         }
         setupHint.textContent = '';
-        var pool = (P.demoQuestions[category] || []).filter(function (q) { return q.d === difficulty; });
-        if (!pool.length) pool = P.demoQuestions[category] || [];
-        var picked = [];
-        for (var k = 0; k < count && pool.length; k++) picked.push({ q: pool[k % pool.length].q });
-        beginSession(picked, { role: role, category: category, difficulty: difficulty });
+        if (setupOfflineStart) setupOfflineStart.hidden = true;
+        creating = true;
+        setupStart.disabled = true;
+        setupStart.textContent = 'Starting interview…';
+        window.PREP_API.createInterview({ role: role, category: category, difficulty: difficulty, question_count: count })
+          .then(function (res) {
+            creating = false;
+            setupStart.disabled = false;
+            setupStart.textContent = 'Start Interview';
+            if (res.ok && res.data && Array.isArray(res.data.questions) && res.data.questions.length) {
+              var picked = res.data.questions.map(function (q) { return { q: q.text, id: q.id }; });
+              beginSession(picked, { role: role, category: category, difficulty: difficulty }, res.data.session_id);
+              return;
+            }
+            showCreateError(res);
+          });
       });
+
+      if (setupOfflineStart) {
+        setupOfflineStart.addEventListener('click', function () {
+          var role = setupRole.value, category = setupCategory.value,
+              difficulty = setupDifficulty.value, count = parseInt(setupCount.value, 10);
+          if (!role || !category) {
+            setupHint.textContent = 'Select a job role and an interview category to continue.';
+            return;
+          }
+          startOfflineInterview(role, category, difficulty, count);
+        });
+      }
     }
   };
 
@@ -389,8 +510,11 @@
               '<div class="qa-body">' + esc(q.fb) + '</div></details>';
           }).join('') + '</div></div>';
       } else {
-        // A Phase 3 demo attempt: show the real questions/answers and a clearly labeled, non-AI demo score.
-        out += '<div class="notice">This result uses a sample/demo score — a simple word-count heuristic for this prototype phase, not an AI evaluation of your answers.</div>' +
+        // A Phase 3/4 demo attempt: show the real questions/answers and a clearly labeled, non-AI demo score.
+        var sourceNote = a.source === 'backend'
+          ? 'This result uses a sample/demo score — a simple word-count heuristic for this prototype phase, not an AI evaluation of your answers. Your answers were submitted to and stored by the local FastAPI backend during this session.'
+          : 'This result uses a sample/demo score — a simple word-count heuristic for this prototype phase, not an AI evaluation of your answers. This attempt was kept only in this browser; the backend was not used (or was unavailable) for this session.';
+        out += '<div class="notice">' + sourceNote + '</div>' +
           '<div class="score-row"><div class="big-score">' + a.score + '<span>/ 100 (demo)</span></div>' +
           '<div class="score-meta">' + resultHTML(a) + '<p>' + cmp + '</p></div></div>' +
           '<div><h3 class="section-title">Your Answers (Demo Submission)</h3><div class="qa-list">' +
@@ -415,24 +539,11 @@
   function checkBackendStatus() {
     var box = $('#backend-status'), text = $('#backend-status-text');
     if (!box || !text) return;
-    var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    var timeout = ctrl && setTimeout(function () { ctrl.abort(); }, 3000);
-    fetch('http://127.0.0.1:8000/health', ctrl ? { signal: ctrl.signal } : {})
-      .then(function (res) {
-        clearTimeout(timeout);
-        if (!res.ok) throw new Error('unexpected status ' + res.status);
-        return res.json();
-      })
-      .then(function (data) {
-        var ok = data && data.status === 'ok';
-        box.className = 'notice ' + (ok ? 'is-ok' : 'is-down');
-        text.textContent = ok ? 'Backend connected' : 'Backend unavailable';
-      })
-      .catch(function () {
-        clearTimeout(timeout);
-        box.className = 'notice is-down';
-        text.textContent = 'Backend unavailable';
-      });
+    window.PREP_API.health().then(function (res) {
+      var ok = res.ok && res.data && res.data.status === 'ok';
+      box.className = 'notice ' + (ok ? 'is-ok' : 'is-down');
+      text.textContent = ok ? 'Backend connected' : 'Backend unavailable';
+    });
   }
 
   pages.settings = function () {
