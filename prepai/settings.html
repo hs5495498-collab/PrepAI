@@ -22,6 +22,23 @@
 
       <div class="notice" id="backend-status" role="status" aria-live="polite"><span class="status-dot"></span><span id="backend-status-text">Checking backend connection…</span></div>
 
+      <section class="group" id="account-section" style="border-top:0;padding-top:0">
+        <h3>Account</h3>
+        <div id="account-loggedout">
+          <p class="subtle">Sign in to attach interviews you create to your account. An account is optional — everything still works without one, including Offline Demo Mode.</p>
+          <div class="field "><div><label for="authEmail">Email</label></div><input class="input" id="authEmail" type="email" autocomplete="email"></div>
+          <div class="field "><div><label for="authPassword">Password</label></div><input class="input" id="authPassword" type="password" autocomplete="current-password"></div>
+          <p class="hint" id="authHint" role="alert"></p>
+          <div style="display:flex;gap:12px;justify-content:flex-end">
+            <button class="btn btn-secondary" id="authRegisterBtn" type="button">Create Account</button>
+            <button class="btn btn-primary" id="authLoginBtn" type="button">Log In</button>
+          </div>
+        </div>
+        <div id="account-loggedin" hidden>
+          <div class="field "><div><label>Signed in as</label><div class="field-desc" id="accountEmail"></div></div><button class="btn btn-ghost" id="authLogoutBtn" type="button">Log Out</button></div>
+        </div>
+      </section>
+
       <form id="settings-form" style="display:flex;flex-direction:column;gap:40px">
         <section class="group" style="border-top:0;padding-top:0">
           <h3>Interview preferences</h3>

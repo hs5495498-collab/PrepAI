@@ -22,7 +22,10 @@ or otherwise.
   once per question as you move past it in `practice.html`.
 - `POST /api/interviews/{session_id}/complete` - mark a session completed.
   Called when you click "Finish Interview" on the last question.
-- CORS restricted to `http://127.0.0.1:5500` (the frontend's Live Server origin).
+- `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`,
+  `GET /api/auth/me` - account creation and sessions (Phase 7, see below).
+- CORS restricted to `http://127.0.0.1:5500` (the frontend's Live Server
+  origin), with `allow_credentials=True` so the session cookie works.
 
 ## AI question generation (Phase 5)
 
@@ -99,10 +102,8 @@ instead of trying to force an update.
 - **No AI answer evaluation or scoring, at all.** The "demo score" the
   frontend shows is the same non-AI word-count heuristic used since Phase 3,
   completely unrelated to whether the questions were AI-generated.
-- **No authentication, user accounts, or login.** The database has a
-  `user_id` column reserved on the `interviews` table for a future phase,
-  but it is always `NULL` right now - every interview is anonymous, and
-  there is no way to tell one visitor's interviews apart from another's.
+- **No social login, email verification, or password reset.** Accounts are
+  email+password only (see "Authentication and accounts" below).
 - No way to resume a backend session after a page refresh - if you reload
   `practice.html` mid-interview, that in-progress session (backend or
   offline) is lost. (The *data* for an already-created session does survive
@@ -129,7 +130,7 @@ answers.
 
 | Table | Stores | Key points |
 |---|---|---|
-| `interviews` | One row per session: `id`, `role`, `category`, `difficulty`, `question_count`, `status`, `question_source`, `created_at`, `completed_at`, and a `user_id` column reserved for a future accounts phase (always `NULL` today). | `id` is the same session ID the frontend already uses. |
+| `interviews` | One row per session: `id`, `role`, `category`, `difficulty`, `question_count`, `status`, `question_source`, `created_at`, `completed_at`, and `user_id` (see Phase 7 below - `NULL` for anonymous/offline interviews, a real account's `id` otherwise). | `id` is the same session ID the frontend already uses. `user_id` has an index but, deliberately, no foreign-key constraint - see "Why no FK on `user_id`" below. |
 | `questions` | One row per question: which `interview_id` it belongs to, its `id` (`q1`, `q2`, ...), its `text`, and its `position` (display order). | Primary key is `(interview_id, id)` - question IDs like `q1` are only unique *within* one interview, not globally. |
 | `answers` | One row per submitted answer: `interview_id`, `question_id`, `answer_text`, `submitted_at`. | A `UNIQUE (interview_id, question_id)` constraint enforces "no duplicate answer" at the database level, not just in application code. A foreign key ties every answer to a question that must actually exist in that same interview. |
 
@@ -160,24 +161,164 @@ it while the backend isn't running: `copy backend\data\prepai.db backend\data\pr
 
 **Current limitations:** no database migrations tooling (schema changes so
 far have only ever added tables/columns, never changed existing ones), no
-connection pooling (fine at this scale), and - as above - no user accounts
-yet, so there's no way to filter "my" interviews from anyone else's.
+connection pooling (fine at this scale).
+
+### Why no foreign key on `interviews.user_id`
+
+SQLite can't add a foreign-key constraint to a column on an *existing*
+table without rebuilding the whole table (copy all rows into a new table,
+drop the old one, rename) - and that rebuild is exactly the kind of risky,
+hard-to-verify operation this project avoids doing to a database that might
+already hold real data. Instead, `user_id` has a plain index (fast lookups)
+and ownership is enforced entirely in application code (`main.py`), which is
+where the real security boundary has to live anyway - a database-level FK
+would not stop someone from trying to access another user's interview by
+guessing its ID; only the ownership check in the route handler does that
+(see "Authentication and accounts" below).
+
+## Authentication and accounts (Phase 7)
+
+Accounts are **optional**. Everything that worked before Phase 7 - the
+offline demo, anonymous interviews, Settings' backend-health indicator,
+AI/fixed question generation - still works exactly the same with no
+account at all. Logging in only adds one thing: interviews you create while
+logged in are tied to your account, and only you can read, answer, or
+complete them afterward.
+
+### New tables
+
+| Table | Stores |
+|---|---|
+| `users` | `id`, a normalized-lowercase, unique `email`, an Argon2id `password_hash` (never the plain password), `created_at`. |
+| `sessions` | A random opaque `token` (the thing the cookie actually carries), a matching random `csrf_token`, which `user_id` it belongs to, and `created_at`/`expires_at`. |
+
+Both are created with `CREATE TABLE IF NOT EXISTS`, so running this on an
+existing Phase 6 database is safe - your existing `interviews`/`questions`/
+`answers` rows are completely untouched, and every interview that already
+existed keeps `user_id = NULL` (unowned) forever; nothing automatically
+claims old interviews for a new account, and there is no "transfer
+ownership" feature at all.
+
+### Password hashing
+
+Passwords are hashed with **Argon2id** (`argon2-cffi`, the library OWASP
+currently recommends) before anything touches the database. The plain
+password is never stored, logged, or included in any response or error
+message. Login compares against the stored hash in roughly constant time
+even for an unknown email, specifically so a timing difference can't be
+used to guess which emails have accounts.
+
+### How sessions work (and why there's no app-wide secret key)
+
+A session is **not** a JWT. Logging in or registering generates a random,
+unguessable token (`secrets.token_urlsafe(32)`) and stores it in the
+`sessions` table; that token is the only thing the cookie carries. Every
+request, the backend looks the token up in the database - if it's there and
+not expired, you're logged in as whoever it belongs to; if not, you aren't.
+This means:
+- There is no secret key to configure or leak - revoking a session is just
+  deleting its database row, which logout does immediately.
+- A session is always a **brand-new** random value issued by the server -
+  nothing a client sends is ever accepted as a session identifier on
+  login/register, which is what prevents session fixation.
+- Sessions expire after `SESSION_LIFETIME_DAYS` (default **7 days** - see
+  `.env.example`); an expired token is treated exactly like no token at all.
+
+### Cookies and CORS
+
+Two cookies get set on successful login/register:
+
+| Cookie | HttpOnly | Purpose |
+|---|---|---|
+| `prepai_session` | Yes | The session token. JavaScript can never read this - only the browser sends it back automatically. |
+| `prepai_csrf` | No | A matching random value the frontend reads via `document.cookie` and echoes back as an `X-CSRF-Token` header on state-changing requests. |
+
+Both use `SameSite=Lax`. Because the frontend (`127.0.0.1:5500`) and backend
+(`127.0.0.1:8000`) are the same *site* (same host, `127.0.0.1`) even though
+they're different *origins* (different port), `SameSite=Lax` cookies are
+still sent on these cross-port `fetch()` calls - the stricter `SameSite=None`
+(which would additionally require `Secure`, i.e. HTTPS) isn't needed for
+this specific setup. `main.py`'s CORS config explicitly lists the one
+allowed origin and sets `allow_credentials=True` - **never** a wildcard
+origin, which browsers refuse to combine with credentials anyway.
+
+**For local HTTP development**, cookies are issued without the `Secure`
+attribute (`SESSION_COOKIE_SECURE` defaults to `false`), which is required
+since this project runs over plain `http://127.0.0.1`. **If you ever deploy
+this over real HTTPS**, set `SESSION_COOKIE_SECURE=true` in that
+environment's `.env` - leaving it `false` in production would let the
+cookie be sent over an unencrypted connection.
+
+### CSRF protection
+
+Every state-changing request made *while logged in* (`POST /api/interviews`,
+`.../answers`, `.../complete`, `POST /api/auth/logout`) must include the
+`X-CSRF-Token` header matching the `prepai_csrf` cookie, or the backend
+rejects it with `403`. `prepai/js/api.js` does this automatically for every
+request. Anonymous requests (no session cookie at all - the existing
+offline/demo flow) are never asked for this header, since there is no
+cookie-based ambient authority for a forged request to exploit in the first
+place.
+
+### Ownership enforcement
+
+`POST /api/interviews` tags a new interview with your account's `user_id`
+if you're logged in, or leaves it `NULL` (anonymous) if you're not - this
+happens automatically based on whether a valid session cookie is present;
+there is no separate toggle. For `GET /api/interviews/{id}`, `.../answers`,
+and `.../complete`:
+- An **unowned** (`user_id IS NULL`) interview keeps the exact Phase 4-6
+  behavior - open to anyone who has the session ID, logged in or not.
+- An **owned** interview is only visible/usable by the account that created
+  it. Anyone else - a different logged-in account, or no account at all -
+  gets the same `404 Interview session not found` a nonexistent ID would
+  give, so the response never confirms that someone else's private
+  interview even exists.
+
+This check happens in `main.py` on every request; a client can never
+influence whose interview it is by sending its own `user_id` - that value
+is only ever read from the server-validated session.
+
+### Using it from the frontend
+
+Settings page → **Account** section: email + password fields with
+**Create Account** / **Log In** buttons when logged out, or your email and
+a **Log Out** button when logged in. Error messages (wrong password,
+duplicate email, unreachable server) show inline. No other page changed -
+`practice.html`'s interview flow works identically whether or not you're
+logged in, because `prepai/js/api.js` now sends `credentials: 'include'`
+(and the CSRF header, when applicable) on every call without any page
+needing to know about it.
+
+### Known limitations / not a production security audit
+
+- No password reset or email verification flow.
+- No rate limiting on login attempts (a determined attacker could still
+  brute-force a weak password over many requests).
+- No "log out everywhere" - logout only deletes the one session the request
+  came from.
+- No automatic cleanup of expired session rows (they're just ignored, not
+  deleted) - harmless at prototype scale, but would grow unbounded forever.
+- This has not been through a real security review or threat-modeling
+  exercise and should not be described as "production-secure" without one.
 
 ## Project files
 
 | File | Purpose |
 |---|---|
-| `main.py` | FastAPI app and route handlers. Decides AI vs. fixed questions per request and loads `.env` at startup. |
-| `db.py` | SQLite connection + schema setup (Phase 6), separate from both the route handlers and the repository logic. |
-| `storage.py` | The session/question/answer repository. Same public functions as Phase 5 (`create_session`, `get_session`, `record_answer`, `complete_session`), now backed by the database instead of a dictionary. |
+| `main.py` | FastAPI app and route handlers: auth routes, interview routes (now ownership- and CSRF-aware), CORS config, loads `.env` at startup. |
+| `auth.py` | Password hashing, user accounts, and session/CSRF token management (Phase 7) - isolated from both `storage.py` and the route handlers. |
+| `db.py` | SQLite connection + schema setup (Phase 6/7: `interviews`, `questions`, `answers`, `users`, `sessions`), separate from the route handlers and repository logic. |
+| `storage.py` | The session/question/answer repository. Same public functions as Phase 5 (`create_session`, `get_session`, `record_answer`, `complete_session`), now backed by the database instead of a dictionary, and now also tracking each interview's `user_id`. |
 | `ai_provider.py` | The AI question-generation service (OpenAI), isolated from the route handlers. Validates input, makes one request with a timeout, validates the output, never logs the API key. |
-| `schemas.py` | Pydantic models that validate requests and shape responses, including `question_source`. |
+| `schemas.py` | Pydantic models that validate requests and shape responses, including `question_source`, `RegisterRequest`/`LoginRequest`/`UserOut`. |
 | `questions.py` | Small sample question bank (Technical/HR/Behavioral), mirroring `prepai/js/data.js`. Used whenever AI generation is off or unavailable. |
 | `tests/test_api.py` | Automated pytest tests covering the interview API, including AI-enabled/disabled/failure cases and a database-error case (all mocked). |
 | `tests/test_ai_provider.py` | Unit tests for `ai_provider.py` using a fake HTTP client - no real network calls, no API key, no cost. |
 | `tests/test_storage.py` | Tests for the SQLite persistence layer directly: schema, ordering, duplicate rejection, foreign keys, transaction rollback, and restart simulation. |
+| `tests/test_auth.py` | Registration, login, logout, session expiry, CSRF enforcement, and cross-account ownership isolation tests. |
 | `tests/conftest.py` | Points every test at its own temporary database file, so running the test suite never touches `backend/data/prepai.db`. |
-| `requirements.txt` | fastapi, uvicorn, pytest, httpx, python-dotenv. (SQLite itself is part of Python's standard library - no new dependency needed.) |
+| `requirements.txt` | fastapi, uvicorn, pytest, httpx, python-dotenv, argon2-cffi. (SQLite itself is part of Python's standard library.) |
 | `.env.example` | Placeholder config, safe to commit. Copy to `.env` (never committed) to actually configure anything. |
 
 ## Running the backend (Windows PowerShell)
@@ -222,7 +363,9 @@ monkeypatches `ai_provider.generate_questions` at the API level
 even if you happen to have a real `.env` configured on the same machine.
 
 It also never touches your real development database - `tests/conftest.py`
-points every test at its own fresh temporary database file instead.
+points every test at its own fresh temporary database file instead, so
+`tests/test_auth.py`'s registered test accounts never end up in
+`backend/data/prepai.db`.
 
 ## Trying the API by hand
 
@@ -252,6 +395,28 @@ curl.exe http://127.0.0.1:8000/api/interviews/SESSION_ID
 curl.exe -X POST http://127.0.0.1:8000/api/interviews/SESSION_ID/complete
 ```
 
+### Example: registering, logging in, and creating an owned interview
+
+curl doesn't manage cookies between calls by itself, so pass `-c jar.txt`
+to save them and `-b jar.txt` to send them back on the next call:
+
+```powershell
+# 1. Register (this also logs you in and sets the cookies)
+curl.exe -c jar.txt -X POST http://127.0.0.1:8000/api/auth/register `
+  -H "Content-Type: application/json" `
+  -d '{"email":"you@example.com","password":"a-long-enough-password"}'
+
+# 2. Read the CSRF cookie's value out of jar.txt (it's the prepai_csrf line's last column),
+#    then use it as a header on any state-changing call:
+curl.exe -b jar.txt -X POST http://127.0.0.1:8000/api/interviews `
+  -H "Content-Type: application/json" -H "X-CSRF-Token: PASTE_IT_HERE" `
+  -d '{"role":"Backend Developer","category":"hr","difficulty":"easy","question_count":2}'
+# -> this interview's user_id is now set - only you can read/answer/complete it
+
+# 3. Check who you are
+curl.exe -b jar.txt http://127.0.0.1:8000/api/auth/me
+```
+
 ## Error responses
 
 All errors use FastAPI's standard `{"detail": "..."}` shape, with these
@@ -267,3 +432,10 @@ status codes:
 | Submitting an answer after the session is completed | 409 |
 | Completing an already-completed session | 409 |
 | AI generation is enabled but fails (timeout, auth, rate limit, outage, or an unusable response) | 503 |
+| Invalid email format on registration | 422 |
+| Password shorter than 8 characters on registration | 422 |
+| Registering an email that's already taken | 409 |
+| Login with an unknown email, or the wrong password (same status/style for both, on purpose) | 401 |
+| `GET /api/auth/me` with no valid session | 401 |
+| A state-changing request made while logged in, without a matching `X-CSRF-Token` header | 403 |
+| Reading/answering/completing an interview owned by a different account (or by no one, while you're someone else) | 404 |

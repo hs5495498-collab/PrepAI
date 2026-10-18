@@ -550,8 +550,69 @@
     });
   }
 
+  function initAccountSection() {
+    var loggedOut = $('#account-loggedout'), loggedIn = $('#account-loggedin'),
+        emailInput = $('#authEmail'), passwordInput = $('#authPassword'), hint = $('#authHint'),
+        registerBtn = $('#authRegisterBtn'), loginBtn = $('#authLoginBtn'), logoutBtn = $('#authLogoutBtn'),
+        emailLabel = $('#accountEmail');
+    if (!emailInput) return; // this page has no account section
+
+    function showLoggedIn(email) {
+      loggedOut.hidden = true;
+      loggedIn.hidden = false;
+      emailLabel.textContent = email;
+    }
+    function showLoggedOut() {
+      loggedOut.hidden = false;
+      loggedIn.hidden = true;
+      passwordInput.value = '';
+    }
+    function setBusy(busy) {
+      registerBtn.disabled = busy;
+      loginBtn.disabled = busy;
+    }
+    function showError(res, fallback) {
+      setBusy(false);
+      hint.textContent = res.status === 0
+        ? 'Could not reach the server. Make sure the backend is running.'
+        : (formatApiError(res.data) || fallback);
+    }
+
+    registerBtn.addEventListener('click', function () {
+      hint.textContent = '';
+      setBusy(true);
+      window.PREP_API.register(emailInput.value, passwordInput.value).then(function (res) {
+        if (res.ok) { setBusy(false); showLoggedIn(res.data.email); }
+        else showError(res, 'Could not create an account with those details.');
+      });
+    });
+
+    loginBtn.addEventListener('click', function () {
+      hint.textContent = '';
+      setBusy(true);
+      window.PREP_API.login(emailInput.value, passwordInput.value).then(function (res) {
+        if (res.ok) { setBusy(false); showLoggedIn(res.data.email); }
+        else showError(res, 'Could not log in with those details.');
+      });
+    });
+
+    logoutBtn.addEventListener('click', function () {
+      logoutBtn.disabled = true;
+      window.PREP_API.logout().then(function () {
+        logoutBtn.disabled = false;
+        showLoggedOut();
+      });
+    });
+
+    window.PREP_API.me().then(function (res) {
+      if (res.ok && res.data) showLoggedIn(res.data.email);
+      else showLoggedOut();
+    });
+  }
+
   pages.settings = function () {
     checkBackendStatus();
+    initAccountSection();
     var saved = Object.assign({}, DEFAULTS, window.PREP_SETTINGS());
     var form = $('#settings-form');
     Object.keys(DEFAULTS).forEach(function (k) {

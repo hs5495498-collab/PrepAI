@@ -3,3 +3,4 @@ uvicorn[standard]
 pytest
 httpx
 python-dotenv
+argon2-cffi

@@ -44,6 +44,25 @@ CREATE TABLE IF NOT EXISTS answers (
     UNIQUE (interview_id, question_id),
     FOREIGN KEY (interview_id, question_id) REFERENCES questions (interview_id, id) ON DELETE CASCADE
 );
+
+CREATE INDEX IF NOT EXISTS idx_interviews_user_id ON interviews (user_id);
+
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    token TEXT PRIMARY KEY,
+    csrf_token TEXT NOT NULL,
+    user_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions (user_id);
 """
 
 

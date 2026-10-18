@@ -54,20 +54,21 @@ def _load_session(conn: sqlite3.Connection, session_id: str) -> dict:
         "created_at": interview["created_at"],
         "completed_at": interview["completed_at"],
         "question_source": interview["question_source"],
+        "user_id": interview["user_id"],
         "questions": [{"id": r["id"], "text": r["text"], "answer": r["answer_text"]} for r in rows],
     }
 
 
-def create_session(role: str, category: str, difficulty: str, questions: List[Tuple[str, str]], question_source: str = "fixed") -> dict:
+def create_session(role: str, category: str, difficulty: str, questions: List[Tuple[str, str]], question_source: str = "fixed", user_id=None) -> dict:
     session_id = uuid.uuid4().hex
     created_at = _now()
     conn = db.connect()
     try:
         with conn:
             conn.execute(
-                "INSERT INTO interviews (id, role, category, difficulty, question_count, status, question_source, created_at, completed_at) "
-                "VALUES (?, ?, ?, ?, ?, 'in_progress', ?, ?, NULL)",
-                (session_id, role, category, difficulty, len(questions), question_source, created_at),
+                "INSERT INTO interviews (id, role, category, difficulty, question_count, status, question_source, created_at, completed_at, user_id) "
+                "VALUES (?, ?, ?, ?, ?, 'in_progress', ?, ?, NULL, ?)",
+                (session_id, role, category, difficulty, len(questions), question_source, created_at, user_id),
             )
             for position, (question_id, text) in enumerate(questions):
                 conn.execute(

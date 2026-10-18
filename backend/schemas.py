@@ -6,6 +6,22 @@ Category = Literal["technical", "hr", "behavioral"]
 Difficulty = Literal["easy", "medium", "hard"]
 
 
+class RegisterRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=254)
+    password: str = Field(..., min_length=8, max_length=128)
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=254)
+    password: str = Field(..., min_length=1, max_length=128)
+
+
+class UserOut(BaseModel):
+    id: int
+    email: str
+    created_at: str
+
+
 class InterviewCreateRequest(BaseModel):
     role: str = Field(..., min_length=1, max_length=120)
     category: Category
