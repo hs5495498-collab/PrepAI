@@ -3,10 +3,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import sqlite3
+
 from fastapi.testclient import TestClient
 
 import ai_provider
 import main
+import storage
 from main import app
 
 client = TestClient(app)
@@ -204,3 +207,38 @@ def test_answer_and_completion_work_with_ai_generated_questions(monkeypatch):
     assert body["status"] == "completed"
     assert body["question_source"] == "ai"
     assert all(q["answer"] == "an answer" for q in body["questions"])
+
+
+def test_database_error_does_not_leak_sql_details(monkeypatch):
+    def broken(*args, **kwargs):
+        raise sqlite3.OperationalError("database is locked: /some/internal/path.db")
+
+    monkeypatch.setattr(main.storage, "create_session", broken)
+
+    # A plain client with raise_server_exceptions=True (TestClient's default)
+    # re-raises an exception into the test even after main.py's app-level
+    # handler already turned it into a safe response - that is a debugging
+    # convenience, not what a real browser would see. Checking the actual
+    # wire response needs raise_server_exceptions=False here.
+    safe_client = TestClient(app, raise_server_exceptions=False)
+    res = safe_client.post(
+        "/api/interviews",
+        json={"role": "Software Engineer", "category": "technical", "difficulty": "medium", "question_count": 3},
+    )
+    assert res.status_code == 500
+    text = res.text
+    assert "database is locked" not in text
+    assert "sqlite3" not in text
+    assert "/some/internal/path.db" not in text
+    assert res.json() == {"error": "Internal server error."}
+
+
+def test_interview_creation_persists_across_a_fresh_storage_call():
+    # Simulates what a backend restart looks like from the outside: no
+    # in-memory session dict exists anywhere, only the database file - a
+    # brand new call to storage.get_session() must still find the session
+    # that an earlier, unrelated request created.
+    created = create_interview(question_count=2).json()
+    reloaded = storage.get_session(created["session_id"])
+    assert reloaded["role"] == "Software Engineer"
+    assert len(reloaded["questions"]) == 2

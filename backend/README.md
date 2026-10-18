@@ -88,44 +88,96 @@ completed attempt's stored `source` field (`backend` or `offline`) records
 honestly which one actually happened, and the results page's wording
 reflects it.
 
-Because sessions only live in memory (see below), a question you already
-submitted to the backend can't be re-submitted if you go back and edit it -
-the API itself rejects that with `409`, and the frontend respects that by
-locking that question's answer box instead of trying to force an update.
+A question you already submitted to the backend can't be re-submitted if
+you go back and edit it - the API itself rejects that with `409` (now
+enforced by the database itself, not just application code - see below),
+and the frontend respects that by locking that question's answer box
+instead of trying to force an update.
 
 ## What's NOT implemented yet (future phases)
 
 - **No AI answer evaluation or scoring, at all.** The "demo score" the
   frontend shows is the same non-AI word-count heuristic used since Phase 3,
   completely unrelated to whether the questions were AI-generated.
-- No database - sessions live in memory only (see "Sessions are not saved
-  permanently" below).
-- No authentication/accounts.
+- **No authentication, user accounts, or login.** The database has a
+  `user_id` column reserved on the `interviews` table for a future phase,
+  but it is always `NULL` right now - every interview is anonymous, and
+  there is no way to tell one visitor's interviews apart from another's.
 - No way to resume a backend session after a page refresh - if you reload
   `practice.html` mid-interview, that in-progress session (backend or
-  offline) is lost, exactly as before Phase 4.4.
+  offline) is lost. (The *data* for an already-created session does survive
+  on the server side as of Phase 6 - there is just no frontend feature yet
+  to look an old, unfinished session back up by its ID after a refresh.)
 - No retry logic for AI requests - a single failed attempt returns an error
   immediately rather than silently retrying (and re-billing).
 
-## Sessions are not saved permanently
+## Database (Phase 6)
 
-Interview sessions are stored in a plain Python dictionary in memory
-(`backend/storage.py`). This means **every session is lost the moment the
-backend process stops or restarts.** That's expected for this phase. A real
-database will be added in a later phase once the API shape is proven.
+Interview sessions, their questions, and submitted answers are stored in a
+real SQLite database file and **survive a backend restart.** Before Phase 6,
+this was a plain Python dictionary that was wiped on every restart - that
+limitation is gone now.
+
+**Location:** `backend/data/prepai.db` by default (created automatically on
+first use - the folder doesn't need to exist beforehand). Override with the
+`DATABASE_PATH` environment variable in your `.env` if you want the file
+somewhere else. The file (and any SQLite journal/WAL files) is excluded by
+`.gitignore` - it is never committed, since it can contain real interview
+answers.
+
+**Tables:**
+
+| Table | Stores | Key points |
+|---|---|---|
+| `interviews` | One row per session: `id`, `role`, `category`, `difficulty`, `question_count`, `status`, `question_source`, `created_at`, `completed_at`, and a `user_id` column reserved for a future accounts phase (always `NULL` today). | `id` is the same session ID the frontend already uses. |
+| `questions` | One row per question: which `interview_id` it belongs to, its `id` (`q1`, `q2`, ...), its `text`, and its `position` (display order). | Primary key is `(interview_id, id)` - question IDs like `q1` are only unique *within* one interview, not globally. |
+| `answers` | One row per submitted answer: `interview_id`, `question_id`, `answer_text`, `submitted_at`. | A `UNIQUE (interview_id, question_id)` constraint enforces "no duplicate answer" at the database level, not just in application code. A foreign key ties every answer to a question that must actually exist in that same interview. |
+
+**How it connects to FastAPI:** `db.py` opens a plain `sqlite3` connection
+(Python's built-in module - no ORM) whenever `storage.py` needs one, turns
+on foreign-key enforcement (SQLite has it off by default), and makes sure
+the three tables above exist (`CREATE TABLE IF NOT EXISTS`, which never
+drops or recreates a table that's already there). `storage.py` keeps the
+exact same function names it had in Phase 5 (`create_session`,
+`get_session`, `record_answer`, `complete_session`), so `main.py`'s route
+handlers did not need to change - they still don't know or care that the
+storage underneath is now a real database instead of a dictionary.
+
+Each interview's creation (the interview row plus all its question rows) is
+written as a single database transaction - if anything in that batch fails,
+none of it is saved, so you never end up with a half-created interview.
+
+**How sessions survive a restart:** `storage.py` never keeps a connection
+or any session data in memory between requests - every function opens a
+fresh connection, does its one piece of work, and closes it again. That
+means there is nothing in RAM to lose when the process stops; the next
+request (even from a brand-new process) just reads the same file from disk.
+This was verified by actually stopping and restarting the real backend
+process during this phase - see the final report.
+
+**Backing up your development database:** it's a single file, so just copy
+it while the backend isn't running: `copy backend\data\prepai.db backend\data\prepai.db.bak`.
+
+**Current limitations:** no database migrations tooling (schema changes so
+far have only ever added tables/columns, never changed existing ones), no
+connection pooling (fine at this scale), and - as above - no user accounts
+yet, so there's no way to filter "my" interviews from anyone else's.
 
 ## Project files
 
 | File | Purpose |
 |---|---|
 | `main.py` | FastAPI app and route handlers. Decides AI vs. fixed questions per request and loads `.env` at startup. |
+| `db.py` | SQLite connection + schema setup (Phase 6), separate from both the route handlers and the repository logic. |
+| `storage.py` | The session/question/answer repository. Same public functions as Phase 5 (`create_session`, `get_session`, `record_answer`, `complete_session`), now backed by the database instead of a dictionary. |
 | `ai_provider.py` | The AI question-generation service (OpenAI), isolated from the route handlers. Validates input, makes one request with a timeout, validates the output, never logs the API key. |
 | `schemas.py` | Pydantic models that validate requests and shape responses, including `question_source`. |
 | `questions.py` | Small sample question bank (Technical/HR/Behavioral), mirroring `prepai/js/data.js`. Used whenever AI generation is off or unavailable. |
-| `storage.py` | In-memory session store and the session state machine; now also remembers each session's `question_source`. |
-| `tests/test_api.py` | Automated pytest tests covering the interview API, including AI-enabled/disabled/failure cases (all mocked). |
+| `tests/test_api.py` | Automated pytest tests covering the interview API, including AI-enabled/disabled/failure cases and a database-error case (all mocked). |
 | `tests/test_ai_provider.py` | Unit tests for `ai_provider.py` using a fake HTTP client - no real network calls, no API key, no cost. |
-| `requirements.txt` | fastapi, uvicorn, pytest, httpx, python-dotenv. |
+| `tests/test_storage.py` | Tests for the SQLite persistence layer directly: schema, ordering, duplicate rejection, foreign keys, transaction rollback, and restart simulation. |
+| `tests/conftest.py` | Points every test at its own temporary database file, so running the test suite never touches `backend/data/prepai.db`. |
+| `requirements.txt` | fastapi, uvicorn, pytest, httpx, python-dotenv. (SQLite itself is part of Python's standard library - no new dependency needed.) |
 | `.env.example` | Placeholder config, safe to commit. Copy to `.env` (never committed) to actually configure anything. |
 
 ## Running the backend (Windows PowerShell)
@@ -168,6 +220,9 @@ provider test injects a fake HTTP client (`tests/test_ai_provider.py`) or
 monkeypatches `ai_provider.generate_questions` at the API level
 (`tests/test_api.py`), so nothing can incur a charge just by running tests,
 even if you happen to have a real `.env` configured on the same machine.
+
+It also never touches your real development database - `tests/conftest.py`
+points every test at its own fresh temporary database file instead.
 
 ## Trying the API by hand
 

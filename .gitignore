@@ -10,6 +10,13 @@ __pycache__/
 *.env
 !.env.example
 
+# SQLite database (Phase 6) - never commit real interview data
+backend/data/
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+
 # OS
 .DS_Store
 Thumbs.db
