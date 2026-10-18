@@ -27,7 +27,7 @@ class DuplicateAnswer(Exception):
     pass
 
 
-def create_session(role: str, category: str, difficulty: str, questions: List[Tuple[str, str]]) -> dict:
+def create_session(role: str, category: str, difficulty: str, questions: List[Tuple[str, str]], question_source: str = "fixed") -> dict:
     session_id = uuid.uuid4().hex
     session = {
         "id": session_id,
@@ -37,6 +37,7 @@ def create_session(role: str, category: str, difficulty: str, questions: List[Tu
         "status": "in_progress",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "completed_at": None,
+        "question_source": question_source,
         "questions": [{"id": q_id, "text": text, "answer": None} for q_id, text in questions],
     }
     SESSIONS[session_id] = session

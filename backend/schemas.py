@@ -28,6 +28,7 @@ class InterviewOut(BaseModel):
     questions: List[QuestionOut]
     total_questions: int
     answered_count: int
+    question_source: Literal["fixed", "ai"] = "fixed"
 
 
 class AnswerRequest(BaseModel):
@@ -59,3 +60,4 @@ class CompletionResponse(BaseModel):
     questions: List[QuestionOut]
     answered_count: int
     total_questions: int
+    question_source: Literal["fixed", "ai"] = "fixed"

@@ -1,8 +1,12 @@
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse
 
+load_dotenv()
+
+import ai_provider
 import storage
 from questions import pick_questions
 from schemas import (
@@ -14,6 +18,15 @@ from schemas import (
 )
 
 app = FastAPI(title="PrepAI Backend")
+
+AI_ERROR_MESSAGES = {
+    ai_provider.AIProviderNotConfigured: "AI question generation is not configured on this server.",
+    ai_provider.AIProviderTimeout: "The AI question generator took too long to respond. Please try again.",
+    ai_provider.AIProviderAuthError: "The AI question generator is misconfigured on this server.",
+    ai_provider.AIProviderRateLimited: "The AI question generator is temporarily busy. Please try again shortly.",
+    ai_provider.AIProviderUnavailable: "The AI question generator is temporarily unavailable. Please try again.",
+    ai_provider.AIProviderInvalidResponse: "The AI question generator returned an unusable response. Please try again.",
+}
 
 app.add_middleware(
     CORSMiddleware,
@@ -48,13 +61,25 @@ def _to_interview_out(session: dict) -> InterviewOut:
         questions=session["questions"],
         total_questions=len(session["questions"]),
         answered_count=storage.answered_count(session),
+        question_source=session["question_source"],
     )
 
 
 @app.post("/api/interviews", response_model=InterviewOut, status_code=201)
 def create_interview(payload: InterviewCreateRequest):
-    questions = pick_questions(payload.category, payload.difficulty, payload.question_count)
-    session = storage.create_session(payload.role, payload.category, payload.difficulty, questions)
+    if ai_provider.is_configured():
+        try:
+            questions = ai_provider.generate_questions(
+                payload.role, payload.category, payload.difficulty, payload.question_count
+            )
+        except ai_provider.AIProviderError as exc:
+            message = AI_ERROR_MESSAGES.get(type(exc), "The AI question generator is currently unavailable.")
+            raise HTTPException(status_code=503, detail=message)
+        question_source = "ai"
+    else:
+        questions = pick_questions(payload.category, payload.difficulty, payload.question_count)
+        question_source = "fixed"
+    session = storage.create_session(payload.role, payload.category, payload.difficulty, questions, question_source)
     return _to_interview_out(session)
 
 
@@ -105,4 +130,5 @@ def complete_interview(session_id: str):
         questions=session["questions"],
         answered_count=storage.answered_count(session),
         total_questions=len(session["questions"]),
+        question_source=session["question_source"],
     )

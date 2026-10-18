@@ -46,5 +46,6 @@ When adding a new screen: create the HTML file with these attributes and the scr
 ### Known prototype limitations (see README.md)
 
 - The microphone/waveform UI in `practice.html` is visual only — no real recording. Hook up `MediaRecorder`/speech-to-text inside `setRecording()` in `pages.js`.
-- No real AI question generation or AI answer evaluation anywhere. All scores shown (backend-connected or offline) are the same non-AI word-count heuristic from `demoScore()` in `pages.js`, always labeled "(demo)".
+- Interview *questions* can be AI-generated (see `backend/ai_provider.py`), but this is off by default and requires the user to configure their own API key in `backend/.env` — see `backend/README.md`. There is still no AI *answer evaluation* anywhere: all scores shown (backend-connected or offline, AI-generated questions or fixed) are the same non-AI word-count heuristic from `demoScore()` in `pages.js`, always labeled "(demo)".
+- A session's `question_source` (`"ai"` or `"fixed"`) is shown live during the interview (next to the question counter) but is not persisted into `localStorage` history — only the existing `source` (`backend`/`offline`) field is.
 - The backend (`backend/`) has no database — interview sessions are in-memory only and are lost on restart. See `backend/README.md`.

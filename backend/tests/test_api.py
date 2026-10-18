@@ -5,6 +5,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi.testclient import TestClient
 
+import ai_provider
+import main
 from main import app
 
 client = TestClient(app)
@@ -138,3 +140,67 @@ def test_complete_twice_rejected():
 def test_complete_invalid_session():
     res = client.post("/api/interviews/does-not-exist/complete")
     assert res.status_code == 404
+
+
+def test_create_interview_uses_fixed_questions_by_default():
+    # No AI env vars are set anywhere in this test run, so every interview
+    # created without extra setup must come from the existing fixed bank -
+    # this is Offline/Demo-equivalent behavior and must never silently
+    # depend on a real AI provider being reachable.
+    body = create_interview().json()
+    assert body["question_source"] == "fixed"
+
+
+def test_create_interview_uses_ai_when_configured(monkeypatch):
+    def fake_generate(role, category, difficulty, count):
+        return [("q{}".format(i + 1), "AI question {} for {}".format(i + 1, role)) for i in range(count)]
+
+    monkeypatch.setattr(main.ai_provider, "is_configured", lambda: True)
+    monkeypatch.setattr(main.ai_provider, "generate_questions", fake_generate)
+
+    body = create_interview(question_count=3).json()
+    assert body["question_source"] == "ai"
+    assert len(body["questions"]) == 3
+    assert body["questions"][0]["text"] == "AI question 1 for Software Engineer"
+    ids = [q["id"] for q in body["questions"]]
+    assert ids == ["q1", "q2", "q3"]
+
+
+def test_create_interview_ai_failure_returns_clear_error_without_fallback(monkeypatch):
+    monkeypatch.setattr(main.ai_provider, "is_configured", lambda: True)
+
+    def fake_fail(role, category, difficulty, count):
+        raise ai_provider.AIProviderUnavailable("the provider is down right now")
+
+    monkeypatch.setattr(main.ai_provider, "generate_questions", fake_fail)
+
+    res = create_interview()
+    assert res.status_code == 503
+    detail = res.json()["detail"]
+    assert "session_id" not in res.json()
+    # The internal exception text must never leak to the client.
+    assert "the provider is down right now" not in detail
+    assert isinstance(detail, str) and len(detail) > 0
+
+
+def test_answer_and_completion_work_with_ai_generated_questions(monkeypatch):
+    def fake_generate(role, category, difficulty, count):
+        return [("q{}".format(i + 1), "AI question {}".format(i + 1)) for i in range(count)]
+
+    monkeypatch.setattr(main.ai_provider, "is_configured", lambda: True)
+    monkeypatch.setattr(main.ai_provider, "generate_questions", fake_generate)
+
+    created = create_interview(question_count=2).json()
+    session_id = created["session_id"]
+    assert created["question_source"] == "ai"
+
+    for q in created["questions"]:
+        res = client.post(f"/api/interviews/{session_id}/answers", json={"question_id": q["id"], "answer": "an answer"})
+        assert res.status_code == 200
+
+    completed = client.post(f"/api/interviews/{session_id}/complete")
+    assert completed.status_code == 200
+    body = completed.json()
+    assert body["status"] == "completed"
+    assert body["question_source"] == "ai"
+    assert all(q["answer"] == "an answer" for q in body["questions"])

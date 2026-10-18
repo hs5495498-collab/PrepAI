@@ -248,7 +248,10 @@
       list = newList; meta = newMeta; i = 0; seconds = 0; paused = false;
       answers = []; recordedFlags = []; submittedToBackend = [];
       backendId = backendSessionId || null;
-      if (sessionMode) sessionMode.textContent = skill ? '' : (backendId ? '· Live backend session' : '· Offline demo (not saved to server)');
+      if (sessionMode) {
+        sessionMode.textContent = skill ? '' : (!backendId ? '· Offline demo (not saved to server)' :
+          meta && meta.questionSource === 'ai' ? '· Live session · AI-generated questions' : '· Live session · fixed question bank');
+      }
       setupEl.hidden = true;
       sessionEl.hidden = false;
       root.classList.remove('is-paused');
@@ -269,6 +272,7 @@
       var msg;
       if (res.status === 0) msg = 'Could not reach the interview server at ' + window.PREP_API.baseUrl + '. Make sure the backend is running.';
       else if (res.status === 422) msg = 'The server rejected this request: ' + (formatApiError(res.data) || 'invalid input.');
+      else if (res.status === 503) msg = formatApiError(res.data) || 'The interview question service is temporarily unavailable.';
       else msg = 'The interview server returned an unexpected error (status ' + res.status + ').';
       setupHint.textContent = msg;
       if (setupOfflineStart) setupOfflineStart.hidden = false;
@@ -310,7 +314,7 @@
             setupStart.textContent = 'Start Interview';
             if (res.ok && res.data && Array.isArray(res.data.questions) && res.data.questions.length) {
               var picked = res.data.questions.map(function (q) { return { q: q.text, id: q.id }; });
-              beginSession(picked, { role: role, category: category, difficulty: difficulty }, res.data.session_id);
+              beginSession(picked, { role: role, category: category, difficulty: difficulty, questionSource: res.data.question_source }, res.data.session_id);
               return;
             }
             showCreateError(res);
