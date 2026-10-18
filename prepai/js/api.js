@@ -73,6 +73,7 @@
         '/api/interviews/' + encodeURIComponent(sessionId) + '/questions/' + encodeURIComponent(questionId) + '/evaluate',
         {}, 30000
       );
-    }
+    },
+    getRecommendations: function () { return request('/api/recommendations'); }
   };
 })();

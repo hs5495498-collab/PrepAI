@@ -442,7 +442,48 @@
         '<a class="link" href="practice.html?focus=' + s.key + '">Practice</a></li>';
     }).join('');
     draw();
+    renderRecommendations();
   };
+
+  /* Personalized recommendations (Phase 9) - read-only and free (this
+     endpoint never calls an AI provider, so there is no cost concern in
+     loading it automatically, unlike the per-question "Evaluate with AI"
+     action elsewhere in the app). Requires being logged in; anonymous
+     visitors get a clear sign-in prompt instead of an error. */
+  function renderRecommendations() {
+    var body = $('#recommendations-body');
+    if (!body) return;
+    body.innerHTML = '<p class="muted">Loading recommendations…</p>';
+    window.PREP_API.getRecommendations().then(function (res) {
+      if (res.status === 401) {
+        body.innerHTML = '<div class="notice">Sign in on the <a class="link" href="settings.html">Settings</a> page to see recommendations based on your own evaluated answers.</div>';
+        return;
+      }
+      if (!res.ok || !res.data) {
+        body.innerHTML = '<div class="notice">Could not load recommendations' +
+          (res.status === 0 ? ' — make sure the backend is running.' : '.') +
+          ' <button class="btn btn-secondary btn-sm" type="button" id="recoRetry" style="margin-left:8px">Try again</button></div>';
+        var retry = $('#recoRetry');
+        if (retry) retry.addEventListener('click', renderRecommendations);
+        return;
+      }
+      var recs = res.data.recommendations || [];
+      if (!recs.length) {
+        body.innerHTML = '<p class="muted">No specific recommendations right now — your evaluated results look solid across the board. Keep practising to build more history.</p>';
+        return;
+      }
+      body.innerHTML = '<ul class="plain-list">' + recs.map(function (r) {
+        var badgeClass = r.priority === 'high' ? 'neg' : r.priority === 'medium' ? '' : 'pos';
+        var evidenceLine = r.evidence_level === 'generic'
+          ? '<span class="muted" style="font-style:italic">General suggestion — not enough history yet for a specific one.</span>'
+          : (r.evidence.length ? '<span class="muted">' + r.evidence.map(esc).join(' · ') + '</span>' : '');
+        return '<li style="align-items:flex-start">' +
+          '<span><strong>' + esc(r.title) + '</strong><br><span class="muted">' + esc(r.explanation) + '</span><br>' + evidenceLine +
+          '<br><span>Next: ' + esc(r.action) + '</span></span>' +
+          '<span class="row-change ' + badgeClass + '" style="width:auto">' + esc(r.priority) + '</span></li>';
+      }).join('') + '</ul><div class="actions" style="margin-top:16px"><a class="btn btn-primary" href="practice.html">Start a Practice Interview</a></div>';
+    });
+  }
 
   /* ---------------- 5. Achievements ---------------- */
   pages.achievements = function () {

@@ -11,6 +11,7 @@ load_dotenv()
 import ai_provider
 import auth
 import evaluation_provider
+import recommendations
 import storage
 from questions import pick_questions
 from schemas import (
@@ -21,6 +22,7 @@ from schemas import (
     InterviewCreateRequest,
     InterviewOut,
     LoginRequest,
+    RecommendationsOut,
     RegisterRequest,
     UserOut,
 )
@@ -297,3 +299,16 @@ def evaluate_answer(session_id: str, question_id: str, request: Request, user: O
 
     saved = storage.save_evaluation(session_id, question_id, result)
     return EvaluationOut(session_id=session_id, **saved)
+
+
+@app.get("/api/recommendations", response_model=RecommendationsOut)
+def get_recommendations(user: dict = Depends(require_user)):
+    # require_user (not the optional variant) - recommendations are always
+    # tied to a real account; there is no anonymous/offline equivalent.
+    data = storage.get_user_recommendation_data(user["id"])
+    recs = recommendations.build_recommendations(data["completed_interviews"], data["evaluations"])
+    return RecommendationsOut(
+        recommendations=recs,
+        completed_interviews=data["completed_interviews"],
+        evaluated_answers=len(data["evaluations"]),
+    )

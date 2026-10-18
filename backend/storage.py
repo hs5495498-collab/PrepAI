@@ -175,6 +175,32 @@ def get_question_for_evaluation(session_id: str, question_id: str) -> dict:
         conn.close()
 
 
+def get_user_recommendation_data(user_id: int) -> dict:
+    """Returns only this account's own data for building recommendations:
+    how many interviews it has completed, and every evaluation attached to
+    an interview it owns (joined with that interview's category/difficulty).
+    Anonymous interviews (user_id IS NULL) and other accounts' interviews
+    are never included - the WHERE clause is the ownership boundary."""
+    conn = db.connect()
+    try:
+        completed = conn.execute(
+            "SELECT COUNT(*) AS n FROM interviews WHERE user_id = ? AND status = 'completed'", (user_id,)
+        ).fetchone()["n"]
+        rows = conn.execute(
+            "SELECT i.category AS category, i.difficulty AS difficulty, "
+            "e.question_id AS question_id, e.total_score AS total_score, "
+            "e.relevance_score AS relevance_score, e.correctness_score AS correctness_score, "
+            "e.completeness_score AS completeness_score, e.clarity_score AS clarity_score, "
+            "e.created_at AS evaluated_at "
+            "FROM evaluations e JOIN interviews i ON i.id = e.interview_id "
+            "WHERE i.user_id = ? ORDER BY e.created_at ASC",
+            (user_id,),
+        ).fetchall()
+        return {"completed_interviews": completed, "evaluations": [dict(r) for r in rows]}
+    finally:
+        conn.close()
+
+
 def _row_to_evaluation(row) -> dict:
     return {
         "question_id": row["question_id"],

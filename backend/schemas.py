@@ -97,3 +97,22 @@ class EvaluationOut(BaseModel):
     model: str
     created_at: str
     note: str = "AI-generated estimate for practice purposes - not an objective or official assessment."
+
+
+class RecommendationOut(BaseModel):
+    key: str
+    title: str
+    explanation: str
+    reason: str
+    category: Optional[Category] = None
+    difficulty: Optional[Difficulty] = None
+    action: str
+    priority: Literal["high", "medium", "low"]
+    evidence: List[str]
+    evidence_level: Literal["data", "limited", "generic"]
+
+
+class RecommendationsOut(BaseModel):
+    recommendations: List[RecommendationOut]
+    completed_interviews: int
+    evaluated_answers: int

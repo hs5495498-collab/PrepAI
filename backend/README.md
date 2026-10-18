@@ -2,13 +2,16 @@
 
 A minimal FastAPI backend for the PrepAI prototype. It exposes a working,
 tested interview API, and the frontend (`practice.html`, `settings.html`,
-`results.html`) actually calls it (since Phase 4.4). Two independent AI
-features exist, both OFF by default and controlled by separate flags:
-**question generation** (Phase 5) and **answer evaluation/scoring**
-(Phase 8). Enabling one never enables the other. Any score an answer
-receives - from either feature's path - is always an AI-generated
-*estimate for practice purposes*, never an objective or official
-measurement; the evaluation response even says so in its own `note` field.
+`results.html`, `analytics.html`) actually calls it (since Phase 4.4). Two
+independent AI features exist, both OFF by default and controlled by
+separate flags: **question generation** (Phase 5) and **answer
+evaluation/scoring** (Phase 8). Enabling one never enables the other. Any
+score an answer receives - from either feature's path - is always an
+AI-generated *estimate for practice purposes*, never an objective or
+official measurement; the evaluation response even says so in its own
+`note` field. **Personalized recommendations** (Phase 9) are a third,
+separate thing again: a deterministic, rule-based engine that reuses
+already-persisted evaluation data - it makes no AI calls of its own at all.
 
 ## What's implemented so far
 
@@ -28,6 +31,8 @@ measurement; the evaluation response even says so in its own `note` field.
   `GET /api/auth/me` - account creation and sessions (Phase 7, see below).
 - `POST /api/interviews/{session_id}/questions/{question_id}/evaluate` -
   score one already-submitted answer with AI feedback (Phase 8, see below).
+- `GET /api/recommendations` - a short, personalized list of what to
+  practise next, built from your own evaluated answers (Phase 9, see below).
 - CORS restricted to `http://127.0.0.1:5500` (the frontend's Live Server
   origin), with `allow_credentials=True` so the session cookie works.
 
@@ -173,6 +178,76 @@ for the same question, and no duplicate row is ever created. There is
 currently no "re-evaluate" or "regenerate" action; the first successful
 evaluation is permanent for that question.
 
+## Personalized recommendations (Phase 9)
+
+`GET /api/recommendations` returns a short, ordered list of what to
+practise next, built entirely from **your own account's** completed
+interviews and evaluated answers. It requires being logged in (there is no
+anonymous equivalent - recommendations are inherently tied to an account's
+history). This is a **plain, deterministic rule engine** (`recommendations.py`)
+- not machine learning, and it makes **no AI/network calls of its own at
+all**, so there is no cost and no provider configuration needed for this
+endpoint to work, even with both AI features disabled.
+
+### What data it uses
+
+Only the authenticated account's own `evaluations` rows (joined with their
+interview's `category`/`difficulty`) and its count of completed interviews.
+`storage.get_user_recommendation_data()` filters by `user_id` at the SQL
+level - anonymous interviews (`user_id IS NULL`) and other accounts'
+interviews are never included, because the query never sees them in the
+first place. Only the most recent 10 evaluations are considered for
+trend/consistency checks (`RECENT_WINDOW` in `recommendations.py`) - recent
+enough to reflect current performance without old history diluting it.
+
+### Rules and thresholds (all in `recommendations.py`, each documented inline)
+
+| Rule | Threshold | Why |
+|---|---|---|
+| No completed interviews | `completed_interviews == 0` | Nothing to base anything on - returns one generic "complete your first interview" suggestion. |
+| Interviews but no evaluations | `len(evaluations) == 0` | Returns one generic "try Evaluate with AI" suggestion, distinct wording from the above. |
+| Weak category | Average score in a category < 60 | Reuses the app's own existing pass/fail line (`P.passMark` in `data.js`) instead of inventing a second number. |
+| Strong category -> harder difficulty | Average score in a category >= 85, at a difficulty below "hard" | Comfortably above the pass mark - only reached by consistent strength. |
+| Weak rubric dimension | A dimension's average < 60% of its own max | Same ratio as the category threshold, applied per-dimension (e.g. correctness < 21/35). |
+| Inconsistent category | Same-category score range (max-min) >= 40 | Large enough that it can't be ordinary noise between similar answers. |
+| "Enough data" to call something a trend | >= 3 evaluated answers | Below 3, one unusually good or bad answer can swing an average entirely. |
+
+A category or dimension with **fewer than 3** samples can still produce a
+recommendation if it's clearly weak, but it is marked `evidence_level:
+"limited"` and given `priority: "medium"` instead of `"high"` - the
+difference between "weak" and "not enough evidence yet" is explicit in the
+response, never silently merged. A category that has **zero** evaluations
+is never mentioned at all - the engine never claims poor performance in
+something the user hasn't actually attempted.
+
+Weak and "suggest harder difficulty" recommendations for the *same*
+category can never both appear (one requires average < 60, the other >= 85
+- mutually exclusive by construction). At most 4 recommendations are
+returned (`MAX_RECOMMENDATIONS`), sorted by priority (`high` → `medium` →
+`low`) and then by a fixed key order, so the same underlying data always
+produces the exact same list in the exact same order.
+
+### Optional AI-generated wording - not implemented this phase
+
+The recommendation text is already written in plain language by this
+module directly (not templated robotic output), so there was no clear need
+for an additional AI-wording layer this phase, and adding one would have
+meant a new provider module, a new flag, and new tests for something
+optional. This is documented here as deliberate future work, not an
+oversight - if added later, it must (per the same pattern as question
+generation/evaluation) be its own explicit flag, must never be required
+for the core recommendations to work, and must never be allowed to invent
+or override the real underlying scores.
+
+### Privacy
+
+The response never includes another account's data, password hashes,
+session tokens, or CSRF tokens - it contains only the recommendation text,
+priority, evidence strings built from the account's own real scores, and
+two small counters (`completed_interviews`, `evaluated_answers`). No answer
+text or personal data is sent anywhere - this endpoint doesn't call any
+external service.
+
 ## How the frontend uses this API
 
 `prepai/js/api.js` (`window.PREP_API`) is the only place the backend URL is
@@ -201,6 +276,13 @@ Older attempts saved before Phase 8, or ones made entirely offline, simply
 don't show the button at all (there's no backend session to evaluate
 against).
 
+On `analytics.html`, a new "Personalized Recommendations" section loads
+automatically (unlike the evaluate button, this makes no AI call and costs
+nothing, so there's no reason to gate it behind a click). If you're not
+logged in, it shows a plain sign-in prompt instead of an error. If the
+request fails, it shows a message and a "Try again" button rather than a
+blank or broken section.
+
 ## What's NOT implemented yet (future phases)
 
 - **No "re-evaluate" button.** The first successful evaluation of a
@@ -214,6 +296,12 @@ against).
   to look an old, unfinished session back up by its ID after a refresh.)
 - No retry logic for AI requests - a single failed attempt returns an error
   immediately rather than silently retrying (and re-billing).
+- **No dismissed/tracked recommendations.** There's no way to mark a
+  recommendation as seen or acted on - the same evidence always produces
+  the same recommendation again on the next page load. Deliberately left
+  as documented future work rather than added speculatively this phase.
+- **No optional AI-generated wording for recommendations.** See
+  "Personalized recommendations" above for why this was skipped.
 
 ## Database (Phase 6)
 
@@ -419,12 +507,15 @@ needing to know about it.
 | `storage.py` | The session/question/answer repository. Same public functions as Phase 5 (`create_session`, `get_session`, `record_answer`, `complete_session`), now backed by the database instead of a dictionary, and now also tracking each interview's `user_id`. |
 | `ai_provider.py` | The AI question-generation service (OpenAI), isolated from the route handlers. Validates input, makes one request with a timeout, validates the output, never logs the API key. |
 | `evaluation_provider.py` | The AI answer-evaluation service (Phase 8) - separate file, separate flag, separate exception types from `ai_provider.py`. Computes the 0-100 total itself rather than trusting the model's arithmetic; never logs the API key or the candidate's answer. |
-| `schemas.py` | Pydantic models that validate requests and shape responses, including `question_source`, `RegisterRequest`/`LoginRequest`/`UserOut`, `EvaluationOut`. |
+| `recommendations.py` | The deterministic recommendation engine (Phase 9) - pure functions, no DB access and no AI calls at all; takes already-fetched, already-owned data in and returns a ranked recommendation list out. |
+| `schemas.py` | Pydantic models that validate requests and shape responses, including `question_source`, `RegisterRequest`/`LoginRequest`/`UserOut`, `EvaluationOut`, `RecommendationOut`/`RecommendationsOut`. |
 | `questions.py` | Small sample question bank (Technical/HR/Behavioral), mirroring `prepai/js/data.js`. Used whenever AI generation is off or unavailable. |
 | `tests/test_api.py` | Automated pytest tests covering the interview API, including AI-enabled/disabled/failure cases and a database-error case (all mocked). |
 | `tests/test_ai_provider.py` | Unit tests for `ai_provider.py` using a fake HTTP client - no real network calls, no API key, no cost. |
 | `tests/test_evaluation_provider.py` | Unit tests for `evaluation_provider.py`: valid scoring, out-of-range/malformed responses, blank answers, provider failures, category-specific prompt content - fake HTTP client only. |
 | `tests/test_evaluation_api.py` | API-level evaluation tests: persistence, idempotency, failed-evaluation-saves-nothing, ownership isolation, CSRF, anonymous access. |
+| `tests/test_recommendations.py` | Pure logic tests for `recommendations.py`: weak/strong/inconsistent detection, missing-data handling, ordering determinism, recommendation count limit - no DB, no network. |
+| `tests/test_recommendations_api.py` | API-level tests: authentication required, cross-account privacy, anonymous interviews never attributed, database-error handling. |
 | `tests/test_storage.py` | Tests for the SQLite persistence layer directly: schema, ordering, duplicate rejection, foreign keys, transaction rollback, and restart simulation. |
 | `tests/test_auth.py` | Registration, login, logout, session expiry, CSRF enforcement, and cross-account ownership isolation tests. |
 | `tests/conftest.py` | Points every test at its own temporary database file, so running the test suite never touches `backend/data/prepai.db`. |
@@ -473,7 +564,10 @@ client, and the API-level tests (`tests/test_api.py`,
 `tests/test_evaluation_api.py`) monkeypatch `ai_provider`/
 `evaluation_provider` functions directly - so nothing can incur a charge
 just by running tests, even if you happen to have a real `.env` configured
-with live keys on the same machine.
+with live keys on the same machine. `tests/test_recommendations.py` needs
+none of this at all - `recommendations.py` makes no network or database
+calls, so those tests just call its functions directly with plain
+in-memory data.
 
 It also never touches your real development database - `tests/conftest.py`
 points every test at its own fresh temporary database file instead, so
@@ -528,6 +622,9 @@ curl.exe -b jar.txt -X POST http://127.0.0.1:8000/api/interviews `
 
 # 3. Check who you are
 curl.exe -b jar.txt http://127.0.0.1:8000/api/auth/me
+
+# 4. See your recommendations (free - no AI call, works with zero evaluations)
+curl.exe -b jar.txt http://127.0.0.1:8000/api/recommendations
 ```
 
 ### Example: evaluating an answer (only after you set AI_EVALUATION_ENABLED=true and a real key - see "AI answer evaluation" above; this makes a real, paid request)
@@ -585,3 +682,5 @@ status codes:
 | Evaluating an interview you don't own (or no one owns, while you're someone else) | 404 |
 | Evaluation requested but `AI_EVALUATION_ENABLED` is off, misconfigured, or the provider call fails for any reason | 503 |
 | Re-evaluating an already-evaluated question | 200 - returns the existing stored result, not an error |
+| `GET /api/recommendations` with no valid session (recommendations have no anonymous equivalent) | 401 |
+| `GET /api/recommendations` for an account with no completed interviews, or interviews but no evaluations | 200 - a generic, clearly-labeled recommendation, not an error |
