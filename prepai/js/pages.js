@@ -221,13 +221,14 @@
     }
 
     function finishFromBackend(data) {
-      var qa = (data.questions || []).map(function (item) { return { q: item.text, a: item.answer || '' }; });
+      var qa = (data.questions || []).map(function (item) { return { id: item.id, q: item.text, a: item.answer || '' }; });
       var attempt = P.addDemoAttempt({
         type: meta ? CATEGORY_LABEL[meta.category] : 'Practice',
         status: 'completed',
         score: demoScore(qa.map(function (x) { return x.a; })),
         qa: qa,
-        source: 'backend'
+        source: 'backend',
+        sessionId: data.session_id
       });
       location.href = 'results.html?id=' + attempt.id;
     }
@@ -523,16 +524,74 @@
           '<div class="score-meta">' + resultHTML(a) + '<p>' + cmp + '</p></div></div>' +
           '<div><h3 class="section-title">Your Answers (Demo Submission)</h3><div class="qa-list">' +
           (a.qa || []).map(function (q, i) {
+            var answered = !!(q.a && q.a.trim());
             return '<details class="qa"><summary><span class="muted">Q' + (i + 1) + '</span><span class="row-title">' + esc(q.q) +
               '</span><span></span><span class="chev">' + icon('chevron', 16) + '</span></summary>' +
-              '<div class="qa-body">' + (q.a && q.a.trim() ? esc(q.a) : '<em>No answer submitted.</em>') + '</div></details>';
+              '<div class="qa-body">' + (answered ? esc(q.a) : '<em>No answer submitted.</em>') +
+              evalBlock(a.sessionId, q, i, answered) + '</div></details>';
           }).join('') + '</div></div>';
       }
     }
     out += '<div class="actions"><a class="btn btn-primary" href="practice.html?focus=weak">Practise Weak Areas</a>' +
       '<a class="btn btn-secondary" href="history.html">Back to Interview History</a></div>';
     $('#result').innerHTML = out;
+    wireEvaluateButtons();
   };
+
+  /* AI answer evaluation (Phase 8) - an explicit per-question action, never
+     automatic, so viewing results never silently triggers a paid AI call. */
+  function evalBlock(sessionId, q, i, answered) {
+    if (!sessionId || !q.id || !answered) return '';
+    return '<div class="eval-box" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)" data-eval-box="' + i + '">' +
+      '<button class="btn btn-secondary btn-sm eval-btn" type="button" data-session="' + esc(sessionId) + '" data-question="' + esc(q.id) + '" data-index="' + i + '">Evaluate with AI</button>' +
+      '<p class="hint" data-eval-hint="' + i + '"></p>' +
+      '<div data-eval-result="' + i + '"></div></div>';
+  }
+  function renderEvaluation(ev) {
+    function list(items) { return '<ul class="bullets">' + items.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul>'; }
+    return '<div class="score-row"><div class="big-score" style="font-size:2.5rem">' + ev.total_score + '<span>/ 100</span></div>' +
+      '<div class="score-meta"><p class="muted">' + esc(ev.note) + '</p></div></div>' +
+      '<div class="eval-dims">' +
+        '<span><strong>' + ev.relevance_score + '</strong>/30 Relevance</span>' +
+        '<span><strong>' + ev.correctness_score + '</strong>/35 Correctness</span>' +
+        '<span><strong>' + ev.completeness_score + '</strong>/25 Completeness</span>' +
+        '<span><strong>' + ev.clarity_score + '</strong>/10 Clarity</span>' +
+      '</div>' +
+      '<p>' + esc(ev.relevance_assessment) + '</p><p>' + esc(ev.correctness_assessment) + '</p>' +
+      '<p class="muted">' + esc(ev.explanation) + '</p>' +
+      '<div class="two-col" style="gap:24px"><div><h4 class="section-title">Strengths</h4>' + list(ev.strengths) + '</div>' +
+      '<div><h4 class="section-title">Areas to improve</h4>' + list(ev.weaknesses) + '</div></div>' +
+      '<div style="margin-top:16px"><h4 class="section-title">Suggestions</h4>' + list(ev.suggestions) + '</div>' +
+      (ev.example_answer ? '<div style="margin-top:16px"><h4 class="section-title">A stronger example answer</h4><p class="muted">' + esc(ev.example_answer) + '</p></div>' : '');
+  }
+  function wireEvaluateButtons() {
+    var result = $('#result');
+    if (!result || result.dataset.evalWired) return;
+    result.dataset.evalWired = '1';
+    result.addEventListener('click', function (e) {
+      var btn = e.target.closest('.eval-btn');
+      if (!btn || btn.disabled) return;
+      var sessionId = btn.getAttribute('data-session'), questionId = btn.getAttribute('data-question'),
+          idx = btn.getAttribute('data-index');
+      var hint = $('[data-eval-hint="' + idx + '"]'), resultEl = $('[data-eval-result="' + idx + '"]');
+      btn.disabled = true;
+      btn.textContent = 'Evaluating…';
+      hint.textContent = '';
+      window.PREP_API.evaluateAnswer(sessionId, questionId).then(function (res) {
+        if (res.ok && res.data) {
+          btn.hidden = true;
+          resultEl.innerHTML = renderEvaluation(res.data);
+          return;
+        }
+        btn.disabled = false;
+        btn.textContent = 'Evaluate with AI';
+        if (res.status === 0) hint.textContent = 'Could not reach the server. Make sure the backend is running.';
+        else if (res.status === 503) hint.textContent = formatApiError(res.data) || 'AI evaluation is not available right now.';
+        else if (res.status === 409) hint.textContent = formatApiError(res.data) || 'This question has not been answered.';
+        else hint.textContent = formatApiError(res.data) || 'Evaluation failed. Please try again.';
+      });
+    });
+  }
 
   /* ---------------- 8. Settings ---------------- */
   var DEFAULTS = {

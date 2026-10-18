@@ -10,12 +10,14 @@ load_dotenv()
 
 import ai_provider
 import auth
+import evaluation_provider
 import storage
 from questions import pick_questions
 from schemas import (
     AnswerRequest,
     AnswerResponse,
     CompletionResponse,
+    EvaluationOut,
     InterviewCreateRequest,
     InterviewOut,
     LoginRequest,
@@ -32,6 +34,15 @@ AI_ERROR_MESSAGES = {
     ai_provider.AIProviderRateLimited: "The AI question generator is temporarily busy. Please try again shortly.",
     ai_provider.AIProviderUnavailable: "The AI question generator is temporarily unavailable. Please try again.",
     ai_provider.AIProviderInvalidResponse: "The AI question generator returned an unusable response. Please try again.",
+}
+
+EVALUATION_ERROR_MESSAGES = {
+    evaluation_provider.EvaluationProviderNotConfigured: "AI answer evaluation is not configured on this server.",
+    evaluation_provider.EvaluationProviderTimeout: "The AI evaluator took too long to respond. Please try again.",
+    evaluation_provider.EvaluationProviderAuthError: "The AI evaluator is misconfigured on this server.",
+    evaluation_provider.EvaluationProviderRateLimited: "The AI evaluator is temporarily busy. Please try again shortly.",
+    evaluation_provider.EvaluationProviderUnavailable: "The AI evaluator is temporarily unavailable. Please try again.",
+    evaluation_provider.EvaluationProviderInvalidResponse: "The AI evaluator returned an unusable response. Please try again.",
 }
 
 app.add_middleware(
@@ -246,3 +257,43 @@ def complete_interview(session_id: str, request: Request, user: Optional[dict] =
         total_questions=len(session["questions"]),
         question_source=session["question_source"],
     )
+
+
+@app.post("/api/interviews/{session_id}/questions/{question_id}/evaluate", response_model=EvaluationOut)
+def evaluate_answer(session_id: str, question_id: str, request: Request, user: Optional[dict] = Depends(get_current_user_optional)):
+    if user is not None:
+        _require_csrf(request, user)
+    try:
+        session = storage.get_session(session_id)
+    except storage.SessionNotFound:
+        raise HTTPException(status_code=404, detail="Interview session not found.")
+    _check_ownership(session, user)
+
+    # Idempotent: a question that was already evaluated returns that same
+    # stored result - this never re-calls the AI provider or creates a
+    # second row, so a retried request can never double-bill.
+    existing = storage.get_evaluation(session_id, question_id)
+    if existing is not None:
+        return EvaluationOut(session_id=session_id, **existing)
+
+    if not evaluation_provider.is_configured():
+        raise HTTPException(status_code=503, detail="AI answer evaluation is not configured on this server.")
+
+    try:
+        qa = storage.get_question_for_evaluation(session_id, question_id)
+    except storage.QuestionNotFound:
+        raise HTTPException(status_code=404, detail="Question not found in this interview session.")
+    except storage.AnswerNotFound:
+        raise HTTPException(status_code=409, detail="This question has not been answered yet, so it cannot be evaluated.")
+
+    try:
+        result = evaluation_provider.evaluate_answer(
+            session["role"], session["category"], session["difficulty"],
+            qa["question_text"], qa["answer_text"],
+        )
+    except evaluation_provider.EvaluationProviderError as exc:
+        message = EVALUATION_ERROR_MESSAGES.get(type(exc), "AI answer evaluation is currently unavailable.")
+        raise HTTPException(status_code=503, detail=message)
+
+    saved = storage.save_evaluation(session_id, question_id, result)
+    return EvaluationOut(session_id=session_id, **saved)

@@ -26,11 +26,12 @@
   function request(path, options) {
     options = options || {};
     var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    var timer = ctrl && setTimeout(function () { ctrl.abort(); }, TIMEOUT_MS);
+    var timer = ctrl && setTimeout(function () { ctrl.abort(); }, options.timeoutMs || TIMEOUT_MS);
     var headers = Object.assign({}, options.headers || {});
     var csrfToken = readCookie('prepai_csrf');
     if (csrfToken && options.method && options.method !== 'GET') headers['X-CSRF-Token'] = csrfToken;
     var init = Object.assign({}, options, { credentials: 'include', headers: headers }, ctrl ? { signal: ctrl.signal } : {});
+    delete init.timeoutMs;
     return fetch(BASE_URL + path, init)
       .then(function (res) {
         if (timer) clearTimeout(timer);
@@ -44,11 +45,12 @@
       });
   }
 
-  function postJSON(path, body) {
+  function postJSON(path, body, timeoutMs) {
     return request(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      timeoutMs: timeoutMs
     });
   }
 
@@ -62,6 +64,15 @@
     register: function (email, password) { return postJSON('/api/auth/register', { email: email, password: password }); },
     login: function (email, password) { return postJSON('/api/auth/login', { email: email, password: password }); },
     logout: function () { return postJSON('/api/auth/logout', {}); },
-    me: function () { return request('/api/auth/me'); }
+    me: function () { return request('/api/auth/me'); },
+    // AI evaluation can genuinely take longer than a normal request - 30s
+    // instead of the default 5s, so a real-but-slow response isn't wrongly
+    // reported as "backend unreachable".
+    evaluateAnswer: function (sessionId, questionId) {
+      return postJSON(
+        '/api/interviews/' + encodeURIComponent(sessionId) + '/questions/' + encodeURIComponent(questionId) + '/evaluate',
+        {}, 30000
+      );
+    }
   };
 })();

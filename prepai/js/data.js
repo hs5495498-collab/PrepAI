@@ -72,6 +72,10 @@
         attempt.score = a.score;
         attempt.qa = a.qa;
         attempt.source = normalizeSource(a);
+        // sessionId is the real backend interview id (Phase 8+), only present
+        // for attempts created while the backend was reachable - it is what
+        // lets the results page ask the backend to evaluate an answer.
+        if (typeof a.sessionId === 'string' && a.sessionId) attempt.sessionId = a.sessionId;
       } else {
         attempt.score = null;
         attempt.answered = a.answered;
@@ -86,8 +90,10 @@
       var toSave = P.attempts.filter(function (a) { return typeof a.id === 'string' && a.id.indexOf('demo-') === 0; })
         .map(function (a) {
           var out = { id: a.id, date: a.date, type: a.type, status: a.status };
-          if (a.status === 'completed') { out.score = a.score; out.qa = a.qa; out.source = normalizeSource(a); }
-          else { out.answered = a.answered; out.total = a.total; }
+          if (a.status === 'completed') {
+            out.score = a.score; out.qa = a.qa; out.source = normalizeSource(a);
+            if (a.sessionId) out.sessionId = a.sessionId;
+          } else { out.answered = a.answered; out.total = a.total; }
           return out;
         });
       localStorage.setItem('prepai.demoAttempts', JSON.stringify(toSave));
@@ -109,6 +115,7 @@
       attempt.score = partial.score;
       attempt.qa = partial.qa || [];
       attempt.source = partial.source === 'backend' ? 'backend' : 'offline';
+      if (partial.sessionId) attempt.sessionId = partial.sessionId;
     } else {
       attempt.score = null;
       attempt.answered = partial.answered || 0;

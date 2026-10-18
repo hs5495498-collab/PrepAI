@@ -77,3 +77,23 @@ class CompletionResponse(BaseModel):
     answered_count: int
     total_questions: int
     question_source: Literal["fixed", "ai"] = "fixed"
+
+
+class EvaluationOut(BaseModel):
+    session_id: str
+    question_id: str
+    total_score: int = Field(..., ge=0, le=100)
+    relevance_score: int = Field(..., ge=0, le=30)
+    correctness_score: int = Field(..., ge=0, le=35)
+    completeness_score: int = Field(..., ge=0, le=25)
+    clarity_score: int = Field(..., ge=0, le=10)
+    relevance_assessment: str
+    correctness_assessment: str
+    explanation: str
+    strengths: List[str]
+    weaknesses: List[str]
+    suggestions: List[str]
+    example_answer: Optional[str] = None
+    model: str
+    created_at: str
+    note: str = "AI-generated estimate for practice purposes - not an objective or official assessment."

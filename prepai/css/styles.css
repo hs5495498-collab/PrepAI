@@ -120,6 +120,8 @@ a.list-row:hover { background: var(--surface); }
 .plain-list { list-style: none; padding: 0; margin-top: 12px; border-top: 1px solid var(--border); }
 .plain-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
 .bullets { margin: 12px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 8px; }
+.eval-dims { display: flex; flex-wrap: wrap; gap: 16px; font-size: .8125rem; color: var(--muted); margin: 8px 0 16px; }
+.eval-dims strong { color: var(--text); font-size: .9375rem; }
 
 /* ---------- Chart ---------- */
 .chart { position: relative; width: 100%; }

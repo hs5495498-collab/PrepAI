@@ -63,6 +63,30 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions (user_id);
+
+CREATE TABLE IF NOT EXISTS evaluations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    interview_id TEXT NOT NULL,
+    question_id TEXT NOT NULL,
+    total_score INTEGER NOT NULL CHECK (total_score >= 0 AND total_score <= 100),
+    relevance_score INTEGER NOT NULL CHECK (relevance_score >= 0 AND relevance_score <= 30),
+    correctness_score INTEGER NOT NULL CHECK (correctness_score >= 0 AND correctness_score <= 35),
+    completeness_score INTEGER NOT NULL CHECK (completeness_score >= 0 AND completeness_score <= 25),
+    clarity_score INTEGER NOT NULL CHECK (clarity_score >= 0 AND clarity_score <= 10),
+    relevance_assessment TEXT NOT NULL,
+    correctness_assessment TEXT NOT NULL,
+    explanation TEXT NOT NULL,
+    strengths TEXT NOT NULL,
+    weaknesses TEXT NOT NULL,
+    suggestions TEXT NOT NULL,
+    example_answer TEXT,
+    model TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (interview_id, question_id),
+    FOREIGN KEY (interview_id, question_id) REFERENCES questions (interview_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_evaluations_interview ON evaluations (interview_id);
 """
 
 

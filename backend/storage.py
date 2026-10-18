@@ -6,6 +6,7 @@ the exact same public function names, arguments, exceptions, and returned
 dict shape as the earlier in-memory version, so main.py's route handlers
 did not need to change at all.
 """
+import json
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -27,6 +28,12 @@ class AlreadyCompleted(Exception):
 
 
 class DuplicateAnswer(Exception):
+    pass
+
+
+class AnswerNotFound(Exception):
+    """Raised when a question exists but has no submitted answer yet -
+    evaluating it would mean evaluating nothing."""
     pass
 
 
@@ -141,3 +148,103 @@ def complete_session(session_id: str) -> dict:
 
 def answered_count(session: dict) -> int:
     return sum(1 for q in session["questions"] if q["answer"] is not None)
+
+
+def get_question_for_evaluation(session_id: str, question_id: str) -> dict:
+    """Returns {question_text, answer_text} for a question that both exists
+    in this interview and has a real, non-blank submitted answer. Raises
+    SessionNotFound / QuestionNotFound / AnswerNotFound otherwise - the
+    answer is always read from the database, never trusted from a caller."""
+    conn = db.connect()
+    try:
+        interview = conn.execute("SELECT id FROM interviews WHERE id = ?", (session_id,)).fetchone()
+        if interview is None:
+            raise SessionNotFound(session_id)
+        question = conn.execute(
+            "SELECT text FROM questions WHERE interview_id = ? AND id = ?", (session_id, question_id)
+        ).fetchone()
+        if question is None:
+            raise QuestionNotFound(question_id)
+        answer = conn.execute(
+            "SELECT answer_text FROM answers WHERE interview_id = ? AND question_id = ?", (session_id, question_id)
+        ).fetchone()
+        if answer is None or not answer["answer_text"] or not answer["answer_text"].strip():
+            raise AnswerNotFound(question_id)
+        return {"question_text": question["text"], "answer_text": answer["answer_text"]}
+    finally:
+        conn.close()
+
+
+def _row_to_evaluation(row) -> dict:
+    return {
+        "question_id": row["question_id"],
+        "total_score": row["total_score"],
+        "relevance_score": row["relevance_score"],
+        "correctness_score": row["correctness_score"],
+        "completeness_score": row["completeness_score"],
+        "clarity_score": row["clarity_score"],
+        "relevance_assessment": row["relevance_assessment"],
+        "correctness_assessment": row["correctness_assessment"],
+        "explanation": row["explanation"],
+        "strengths": json.loads(row["strengths"]),
+        "weaknesses": json.loads(row["weaknesses"]),
+        "suggestions": json.loads(row["suggestions"]),
+        "example_answer": row["example_answer"],
+        "model": row["model"],
+        "created_at": row["created_at"],
+    }
+
+
+def get_evaluation(session_id: str, question_id: str):
+    """Returns the stored evaluation dict for this question, or None if it
+    has never been evaluated."""
+    conn = db.connect()
+    try:
+        row = conn.execute(
+            "SELECT * FROM evaluations WHERE interview_id = ? AND question_id = ?", (session_id, question_id)
+        ).fetchone()
+        return _row_to_evaluation(row) if row is not None else None
+    finally:
+        conn.close()
+
+
+def save_evaluation(session_id: str, question_id: str, result: dict) -> dict:
+    """Stores a new evaluation. If one already exists for this question
+    (e.g. a retried request), returns the EXISTING row rather than creating
+    a duplicate, overwriting it, or calling the AI provider again -
+    evaluation is idempotent per question."""
+    conn = db.connect()
+    try:
+        existing = conn.execute(
+            "SELECT * FROM evaluations WHERE interview_id = ? AND question_id = ?", (session_id, question_id)
+        ).fetchone()
+        if existing is not None:
+            return _row_to_evaluation(existing)
+        try:
+            with conn:
+                conn.execute(
+                    "INSERT INTO evaluations (interview_id, question_id, total_score, relevance_score, "
+                    "correctness_score, completeness_score, clarity_score, relevance_assessment, "
+                    "correctness_assessment, explanation, strengths, weaknesses, suggestions, "
+                    "example_answer, model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        session_id, question_id, result["total_score"], result["relevance_score"],
+                        result["correctness_score"], result["completeness_score"], result["clarity_score"],
+                        result["relevance_assessment"], result["correctness_assessment"], result["explanation"],
+                        json.dumps(result["strengths"]), json.dumps(result["weaknesses"]), json.dumps(result["suggestions"]),
+                        result.get("example_answer"), result["model"], _now(),
+                    ),
+                )
+        except sqlite3.IntegrityError:
+            # A near-simultaneous duplicate request won the race - return
+            # its result instead of erroring or inserting a second row.
+            row = conn.execute(
+                "SELECT * FROM evaluations WHERE interview_id = ? AND question_id = ?", (session_id, question_id)
+            ).fetchone()
+            return _row_to_evaluation(row)
+        row = conn.execute(
+            "SELECT * FROM evaluations WHERE interview_id = ? AND question_id = ?", (session_id, question_id)
+        ).fetchone()
+        return _row_to_evaluation(row)
+    finally:
+        conn.close()
