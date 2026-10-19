@@ -805,3 +805,141 @@ status codes:
 | `GET /api/recommendations` for an account with no completed interviews, or interviews but no evaluations | 200 - a generic, clearly-labeled recommendation, not an error |
 | `GET /api/interviews` or `GET /api/analytics` with no valid session (no anonymous equivalent) | 401 |
 | `GET /api/interviews` or `GET /api/analytics` for an account with no interviews/evaluations | 200 - an honest empty/null response, never an error or a fabricated zero |
+| An answer longer than 10,000 characters (Phase 11) | 422 |
+
+## Security audit and stabilization (Phase 11)
+
+This phase audited the existing implementation (Phases 4-10) against a
+security/correctness checklist rather than adding features. It re-read every
+backend module and the frontend files that call the API, ran the full test
+suite, and exercised live cross-account, CSRF, and CORS scenarios against a
+running server before concluding anything was safe.
+
+### What was checked and confirmed correct (by reading the code and running live tests, not by assuming prior reports)
+
+- **Authentication**: Argon2id hashing, a timing-equalized check for an
+  unknown email (hashes against a decoy to avoid leaking which emails are
+  registered), identical `401` wording for "unknown email" and "wrong
+  password", brand-new random session tokens on every login/register (no
+  session fixation), expired/garbage tokens treated as "not logged in" with
+  no error.
+- **Session/CSRF cookies**: `prepai_session` is `HttpOnly`; `prepai_csrf` is
+  readable by JavaScript (by design - the double-submit pattern needs that);
+  both are `SameSite=Lax`. Verified live: creating/answering/completing an
+  interview or logging out while authenticated and *not* sending
+  `X-CSRF-Token` (or sending a wrong one) is rejected with `403` in every
+  case; anonymous (no session cookie) requests are never asked for it.
+- **CORS**: live `curl` requests with an `Origin: http://evil.example.com`
+  header never got an `Access-Control-Allow-Origin` back (only the one
+  configured origin does), so a browser would refuse to let a script on any
+  other site read the response even with credentials involved.
+- **Ownership/cross-account isolation**: registered two real accounts
+  against a running server and confirmed one account's `GET`/answer/
+  complete/evaluate requests against the other's interview all return the
+  exact same `404 Interview session not found` a nonexistent session ID
+  would - never a `403` or any other hint that the interview exists.
+  `GET /api/interviews`, `GET /api/analytics`, and `GET /api/recommendations`
+  were confirmed to return only the caller's own data (empty/zeroed for a
+  fresh account, never another account's rows). Anonymous (unowned)
+  interviews were confirmed to stay visible to everyone, as designed, and
+  never appear in any account's `/api/interviews` list.
+- **AI cost safety**: with no `.env` file present at all during this audit
+  (confirmed on disk), both `AI_QUESTIONS_ENABLED` and `AI_EVALUATION_ENABLED`
+  default to off, every interview correctly used `question_source: "fixed"`,
+  and every evaluate request correctly returned `503 AI answer evaluation is
+  not configured on this server.` - no real OpenAI request was ever made
+  during this phase. `evaluation_provider.py` was re-confirmed to compute
+  `total_score` itself from the four validated dimension scores, never from
+  a model-reported total.
+- **Idempotency**: submitting the same answer twice returns `409` (not a
+  silent overwrite); the database's `UNIQUE (interview_id, question_id)`
+  constraints back both the answers and evaluations idempotency guarantees,
+  not just the application-level checks in front of them.
+- **Persistence**: stopped and restarted the real backend process during
+  this phase and confirmed a previously created interview and its submitted
+  answer were both still present afterward, unchanged.
+- **Secrets/config hygiene**: no `.env` file exists on disk in this
+  environment; `backend/.env` is confirmed untracked by git; `.env.example`
+  contains only commented-out placeholders; `backend/data/` (the real
+  database), `.venv/`, `__pycache__/`, and `*.pyc` are all excluded by
+  `.gitignore`; a repository-wide search found no hardcoded API keys or
+  secret-like strings in any tracked `.py`/`.js` file. The backend has no
+  logging calls at all (`grep` for `print(`/`logging.` in the source found
+  nothing), so there is no log file that could ever contain a password,
+  session token, or submitted answer text.
+- **Dependencies**: all six entries in `requirements.txt`
+  (`fastapi`, `uvicorn[standard]`, `pytest`, `httpx`, `python-dotenv`,
+  `argon2-cffi`) are actually imported and used somewhere in the backend;
+  none are unused, duplicated, or an unexplained major-version pin.
+
+### One verified defect found and fixed
+
+**Unbounded answer length.** `AnswerRequest.answer` had no `max_length`, so
+a client could submit an arbitrarily large string (megabytes or more) that
+would be persisted to the database with no limit - an abuse/resource-exhaustion
+gap, not something any existing test covered. Fixed with a single
+`Field(..., max_length=10000)` in `schemas.py` (10,000 characters is
+generous for a spoken-interview-style answer while still bounding the worst
+case), plus a new regression test
+(`tests/test_api.py::test_submit_oversized_answer_rejected`) confirming a
+10,001-character answer is rejected with `422` and a 10,000-character one is
+still accepted. Verified live against a freshly started server, not just in
+the test suite.
+
+### Testing the main workflow and account isolation yourself
+
+```powershell
+# Terminal 1: backend
+cd "C:\Users\harsh\Downloads\prepai-redesign (1)\backend"
+.venv\Scripts\Activate.ps1
+uvicorn main:app --reload
+
+# Terminal 2: two separate cookie jars simulate two different accounts
+curl.exe -c a.jar -X POST http://127.0.0.1:8000/api/auth/register -H "Content-Type: application/json" -d '{"email":"a@example.com","password":"PasswordAAA1"}'
+curl.exe -c b.jar -X POST http://127.0.0.1:8000/api/auth/register -H "Content-Type: application/json" -d '{"email":"b@example.com","password":"PasswordBBB1"}'
+# Read the prepai_csrf value out of a.jar, then create an interview as account A:
+curl.exe -b a.jar -X POST http://127.0.0.1:8000/api/interviews -H "Content-Type: application/json" -H "X-CSRF-Token: PASTE_A_CSRF_HERE" -d '{"role":"X","category":"technical","difficulty":"easy","question_count":1}'
+# Using account A's session_id but account B's cookie jar - should return 404, not the interview:
+curl.exe -b b.jar http://127.0.0.1:8000/api/interviews/SESSION_ID_FROM_A
+```
+
+### Pre-deployment checklist (not fixed this phase - documented gaps, not oversights)
+
+None of the items below are code defects; they are standing limitations that
+should be addressed before any real/public deployment, separate from the
+local-prototype setup this project currently targets:
+
+- **No rate limiting** on login, registration, or any other endpoint - a
+  determined attacker could brute-force a weak password, or spam account
+  creation, over many requests. Nothing in this codebase throttles that.
+- **`SESSION_COOKIE_SECURE` defaults to `false`**, which is *correct* for
+  local `http://127.0.0.1` development but **must** be set to `true` in any
+  environment actually served over HTTPS - otherwise the session cookie
+  could be sent in the clear.
+- **CORS is hardcoded to one local origin** (`http://127.0.0.1:5500`) in
+  `main.py`. A real deployment must change `allow_origins` to the real
+  frontend domain(s) - never to a wildcard, which browsers refuse to combine
+  with credentials anyway.
+- **`uvicorn --reload`** (used in this README's dev instructions) must never
+  be used in production - it is a development convenience that watches
+  files for changes and is not meant for production serving. A production
+  deployment should run multiple workers behind a process manager instead.
+- **SQLite + multiple workers is a real constraint**: SQLite handles
+  concurrent reads fine but serializes writes, and this project opens a
+  fresh connection per request with no pooling. This is adequate at
+  prototype/single-user scale but would need a different database (e.g.
+  PostgreSQL) or a single-writer architecture before handling meaningful
+  concurrent write traffic.
+- **No email verification or password reset** - accounts are email+password
+  only, as already noted above. There is also no "log out everywhere" and no
+  cleanup job for expired session rows (harmless at this scale, but would
+  grow unbounded in a long-lived deployment).
+- **No structured application logging or monitoring** - there is currently
+  nothing to alert on repeated failed logins, AI provider errors, or
+  unexpected 500s in a real deployment; `main.py`'s global exception handler
+  returns a safe generic message to the client but does not currently record
+  the real error anywhere for an operator to see.
+- Passing automated tests (164 pre-existing + 1 new = 165, all passing - see
+  below) demonstrates the tested behaviors work as intended; it is **not**
+  itself evidence of production-readiness, security review, or performance
+  under real load, none of which happened this phase.

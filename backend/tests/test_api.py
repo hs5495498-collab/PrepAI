@@ -85,6 +85,17 @@ def test_submit_blank_answer_rejected():
     assert res.status_code == 422
 
 
+def test_submit_oversized_answer_rejected():
+    created = create_interview().json()
+    session_id = created["session_id"]
+    question_id = created["questions"][0]["id"]
+    res = client.post(
+        f"/api/interviews/{session_id}/answers",
+        json={"question_id": question_id, "answer": "x" * 10001},
+    )
+    assert res.status_code == 422
+
+
 def test_submit_answer_invalid_session():
     res = client.post("/api/interviews/does-not-exist/answers", json={"question_id": "q1", "answer": "hi"})
     assert res.status_code == 404

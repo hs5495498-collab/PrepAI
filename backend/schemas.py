@@ -63,7 +63,7 @@ class InterviewOut(BaseModel):
 
 class AnswerRequest(BaseModel):
     question_id: str = Field(..., min_length=1)
-    answer: str
+    answer: str = Field(..., max_length=10000)
 
     @field_validator("answer")
     @classmethod
