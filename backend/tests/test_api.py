@@ -156,6 +156,31 @@ def test_complete_invalid_session():
     assert res.status_code == 404
 
 
+def test_fifteen_question_interview_has_no_repeated_questions():
+    # Regression test: a 15-question interview must not come back as the
+    # same 5 questions repeated 3 times.
+    body = create_interview(category="technical", difficulty="medium", question_count=15).json()
+    assert body["total_questions"] == 15
+    texts = [q["text"] for q in body["questions"]]
+    assert len(texts) == 15
+    assert len(set(texts)) == 15
+    assert body["question_bank_note"] is None
+
+
+def test_insufficient_fixed_bank_reports_explicit_note_instead_of_repeating(monkeypatch):
+    import questions as questions_module
+
+    # pick_questions() looks up DEMO_QUESTION_BANK as a module global at call
+    # time, so shrinking it here affects main.py's already-imported
+    # pick_questions reference too, without needing to patch main.py itself.
+    monkeypatch.setattr(questions_module, "DEMO_QUESTION_BANK", {"technical": [("easy", "Only one question?")]})
+    body = create_interview(category="technical", difficulty="easy", question_count=5).json()
+    assert body["total_questions"] == 1
+    assert body["questions"][0]["text"] == "Only one question?"
+    assert body["question_bank_note"] is not None
+    assert "1" in body["question_bank_note"] and "5" in body["question_bank_note"]
+
+
 def test_create_interview_uses_fixed_questions_by_default():
     # No AI env vars are set anywhere in this test run, so every interview
     # created without extra setup must come from the existing fixed bank -

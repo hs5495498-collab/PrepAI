@@ -275,34 +275,62 @@
   P.mixedOrder = [0, 1, 2, 3, 4, 5, 6, 7];
 
   /* ---------- Phase 3 demo interview question bank ----------
-     Deliberately small (6 per category) and clearly sample data. Each category
-     gives 2 questions per difficulty; if more questions are requested than exist
-     for that difficulty, the practice session cycles through them again rather
-     than inventing new ones. */
+     Clearly sample data, mirroring backend/questions.py's DEMO_QUESTION_BANK.
+     Each category has 5 distinct questions per difficulty (15 per category),
+     enough to fill a request for up to 15 (the max offered in practice.html's
+     setup form) with no two questions the same - see pickOfflineQuestions()
+     in js/pages.js, which fills from this bank without ever repeating one. */
   P.demoQuestions = {
     technical: [
       { d: 'easy',   q: 'What is the difference between a list/array and a tuple, and when would you use each?' },
       { d: 'easy',   q: 'What does API stand for, and what problem does it solve?' },
+      { d: 'easy',   q: 'What is version control, and why is it useful on a team?' },
+      { d: 'easy',   q: 'What is the difference between a compiler and an interpreter?' },
+      { d: 'easy',   q: 'What is a REST API?' },
       { d: 'medium', q: 'Explain the difference between == and === (or similar value vs strict equality) in a language you know.' },
       { d: 'medium', q: 'What is a database index, and why does it speed up queries?' },
+      { d: 'medium', q: 'What is the difference between synchronous and asynchronous code?' },
+      { d: 'medium', q: 'Explain how garbage collection works in a language you know.' },
+      { d: 'medium', q: 'What is dependency injection, and why is it useful?' },
       { d: 'hard',   q: 'How would you design a simple rate limiter for an API?' },
-      { d: 'hard',   q: 'Explain how a hash table resolves collisions.' }
+      { d: 'hard',   q: 'Explain how a hash table resolves collisions.' },
+      { d: 'hard',   q: 'How would you design a URL-shortening service?' },
+      { d: 'hard',   q: 'Explain the CAP theorem and the trade-offs it describes.' },
+      { d: 'hard',   q: 'How would you go about debugging a memory leak in a long-running service?' }
     ],
     hr: [
       { d: 'easy',   q: 'Tell me about yourself.' },
       { d: 'easy',   q: 'Why do you want to work here?' },
+      { d: 'easy',   q: 'What do you know about our company?' },
+      { d: 'easy',   q: 'What are you looking for in your next role?' },
+      { d: 'easy',   q: 'How did you hear about this position?' },
       { d: 'medium', q: 'What are your greatest strengths and weaknesses?' },
       { d: 'medium', q: 'Where do you see yourself in five years?' },
+      { d: 'medium', q: 'How do you handle stress or pressure at work?' },
+      { d: 'medium', q: 'What motivates you in your work?' },
+      { d: 'medium', q: 'How do you prioritize your tasks when everything feels urgent?' },
       { d: 'hard',   q: 'Why should we hire you over other candidates?' },
-      { d: 'hard',   q: 'Describe a time you received difficult feedback. How did you respond?' }
+      { d: 'hard',   q: 'Describe a time you received difficult feedback. How did you respond?' },
+      { d: 'hard',   q: 'Describe a time you made a mistake at work. How did you handle it?' },
+      { d: 'hard',   q: 'How do you handle working with a manager you disagree with?' },
+      { d: 'hard',   q: 'What would your previous manager say is your biggest area for growth?' }
     ],
     behavioral: [
       { d: 'easy',   q: 'Describe a time you worked as part of a team.' },
       { d: 'easy',   q: 'Tell me about a goal you set and how you achieved it.' },
+      { d: 'easy',   q: 'Describe a time you had to learn something new quickly.' },
+      { d: 'easy',   q: 'Tell me about a time you helped a colleague solve a problem.' },
+      { d: 'easy',   q: 'Describe a time you took initiative without being asked.' },
       { d: 'medium', q: 'Tell me about a time you disagreed with a teammate and how you resolved it.' },
       { d: 'medium', q: 'Describe a situation where you had to meet a tight deadline.' },
+      { d: 'medium', q: 'Tell me about a time you had to adapt to an unexpected change.' },
+      { d: 'medium', q: 'Describe a time you received critical feedback and how you responded.' },
+      { d: 'medium', q: 'Tell me about a time you had to balance multiple priorities at once.' },
       { d: 'hard',   q: 'Tell me about a time you failed. What did you learn?' },
-      { d: 'hard',   q: 'Describe a time you had to persuade someone who disagreed with you.' }
+      { d: 'hard',   q: 'Describe a time you had to persuade someone who disagreed with you.' },
+      { d: 'hard',   q: 'Describe a time you had to make a difficult decision with incomplete information.' },
+      { d: 'hard',   q: "Tell me about a time you took a risk that didn't pay off." },
+      { d: 'hard',   q: 'Describe a situation where you had to lead a team through a difficult challenge.' }
     ]
   };
 

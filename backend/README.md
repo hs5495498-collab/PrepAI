@@ -45,6 +45,26 @@ data directly - also no AI calls, just database queries and arithmetic.
 - CORS restricted to `http://127.0.0.1:5500` (the frontend's Live Server
   origin), with `allow_credentials=True` so the session cookie works.
 
+## Fixed question bank (no repeats)
+
+`questions.py`'s `DEMO_QUESTION_BANK` has 15 distinct sample questions per
+category (5 easy, 5 medium, 5 hard) - enough to satisfy any request up to
+the schema's max of 15 questions with no two questions the same.
+`pick_questions()` prefers questions matching the requested difficulty
+first, then fills any remaining slots from the rest of the same category,
+but **never** cycles back through questions it has already picked just to
+pad the list out to the requested count. If a category's entire bank is
+ever smaller than the requested count (not possible today at the current
+15/15 sizing, but true at the module's own boundaries if `question_count`'s
+schema max is ever raised past 15), `POST /api/interviews`'s response
+includes a `question_bank_note` string explaining that fewer distinct
+questions were returned than requested - the frontend shows this next to
+the question counter during the session - rather than silently repeating
+or pretending the request was fully satisfied. `ai_provider.py` applies the
+same rule to AI-generated questions: if the provider returns (after
+de-duplication) fewer usable questions than requested, that is now treated
+as a provider failure (`503`), not a silently short "success".
+
 ## AI question generation (Phase 5)
 
 `ai_provider.py` is a self-contained service, kept separate from the route
@@ -619,7 +639,7 @@ needing to know about it.
 | `recommendations.py` | The deterministic recommendation engine (Phase 9) - pure functions, no DB access and no AI calls at all; takes already-fetched, already-owned data in and returns a ranked recommendation list out. |
 | `analytics.py` | Pure analytics calculations (Phase 10) - same no-DB, no-network pattern as `recommendations.py`, and reuses its constants rather than duplicating them. |
 | `schemas.py` | Pydantic models that validate requests and shape responses, including `question_source`, `RegisterRequest`/`LoginRequest`/`UserOut`, `EvaluationOut`, `RecommendationOut`/`RecommendationsOut`, `InterviewSummaryOut`/`InterviewListOut`, `AnalyticsOut`. |
-| `questions.py` | Small sample question bank (Technical/HR/Behavioral), mirroring `prepai/js/data.js`. Used whenever AI generation is off or unavailable. |
+| `questions.py` | Sample question bank (Technical/HR/Behavioral, 15 distinct questions each - 5 per difficulty), mirroring `prepai/js/data.js`. Used whenever AI generation is off or unavailable. `pick_questions()` never repeats a question to pad a short list out to the requested count - see "Fixed question bank" below. |
 | `tests/test_api.py` | Automated pytest tests covering the interview API, including AI-enabled/disabled/failure cases and a database-error case (all mocked). |
 | `tests/test_ai_provider.py` | Unit tests for `ai_provider.py` using a fake HTTP client - no real network calls, no API key, no cost. |
 | `tests/test_evaluation_provider.py` | Unit tests for `evaluation_provider.py`: valid scoring, out-of-range/malformed responses, blank answers, provider failures, category-specific prompt content - fake HTTP client only. |

@@ -214,6 +214,49 @@ class TestLoggedOutStates:
         assert hint.strip() != ""
         assert "Question 1 of 5" in driver.find_element(By.ID, "qcount").text
 
+    def test_dashboard_offers_a_clear_login_link_when_logged_out(self, driver, wait, frontend_url):
+        # Regression test for "login page is not showing": a logged-out
+        # visitor must see an explicit way to log in right from the
+        # dashboard's topbar, not just stumble onto Settings' Account
+        # section by accident.
+        goto(driver, frontend_url, "index.html")
+        wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "body[data-page='dashboard']")))
+        login_link = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, ".topbar-tools a")))
+        wait.until(lambda d: login_link.text.strip() == "Log In")
+        login_link.click()
+        wait.until(EC.url_contains("settings.html#account-section"))
+        logged_out = wait.until(EC.visibility_of_element_located((By.ID, "account-loggedout")))
+        assert logged_out.is_displayed()
+
+    def test_fifteen_question_interview_has_no_duplicate_questions(self, driver, wait, frontend_url):
+        # Regression test for "interview questions repeat": a 15-question
+        # interview must show 15 distinct questions, never 5 repeated 3x.
+        goto(driver, frontend_url, "practice.html")
+        wait.until(EC.visibility_of_element_located((By.ID, "setup")))
+        Select(driver.find_element(By.ID, "setupRole")).select_by_visible_text("Software Engineer")
+        Select(driver.find_element(By.ID, "setupCategory")).select_by_value("technical")
+        Select(driver.find_element(By.ID, "setupDifficulty")).select_by_value("medium")
+        Select(driver.find_element(By.ID, "setupCount")).select_by_value("15")
+        driver.find_element(By.ID, "setupStart").click()
+        wait.until(EC.visibility_of_element_located((By.ID, "session")))
+        wait.until(lambda d: "Question 1 of 15" in d.find_element(By.ID, "qcount").text)
+
+        seen_questions = []
+        for i in range(1, 16):
+            wait.until(lambda d, i=i: f"Question {i} of 15" in d.find_element(By.ID, "qcount").text)
+            seen_questions.append(driver.find_element(By.ID, "question").text)
+            answer_box = driver.find_element(By.ID, "answer")
+            answer_box.clear()
+            answer_box.send_keys(f"Selenium answer for question {i}.")
+            driver.find_element(By.ID, "submit").click()
+            if i == 15:
+                wait.until(EC.alert_is_present())
+                driver.switch_to.alert.accept()
+
+        assert len(seen_questions) == 15
+        assert len(set(seen_questions)) == 15, "a 15-question interview repeated at least one question"
+        wait.until(EC.url_contains("results.html"))
+
 
 class TestOfflineDemoMode:
     """Stops the Selenium suite's own backend subprocess to verify the

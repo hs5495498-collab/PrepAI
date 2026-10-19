@@ -252,6 +252,7 @@
       if (sessionMode) {
         sessionMode.textContent = skill ? '' : (!backendId ? '· Offline demo (not saved to server)' :
           meta && meta.questionSource === 'ai' ? '· Live session · AI-generated questions' : '· Live session · fixed question bank');
+        if (meta && meta.bankNote) sessionMode.textContent += ' · ' + meta.bankNote;
       }
       setupEl.hidden = true;
       sessionEl.hidden = false;
@@ -261,12 +262,27 @@
       startTimer();
     }
 
+    // Mirrors backend/questions.py's pick_questions(): matching-difficulty
+    // questions first, then the rest of the category, each used at most
+    // once - never cycles back through questions already picked to pad
+    // the list up to `count`.
+    function pickOfflineQuestions(category, difficulty, count) {
+      var all = P.demoQuestions[category] || [];
+      var matching = all.filter(function (q) { return q.d === difficulty; });
+      var other = all.filter(function (q) { return q.d !== difficulty; });
+      var ordered = matching.concat(other);
+      return { picked: ordered.slice(0, count), insufficient: count > ordered.length };
+    }
+
     function startOfflineInterview(role, category, difficulty, count) {
-      var pool = (P.demoQuestions[category] || []).filter(function (q) { return q.d === difficulty; });
-      if (!pool.length) pool = P.demoQuestions[category] || [];
-      var picked = [];
-      for (var k = 0; k < count && pool.length; k++) picked.push({ q: pool[k % pool.length].q });
-      beginSession(picked, { role: role, category: category, difficulty: difficulty }, null);
+      var result = pickOfflineQuestions(category, difficulty, count);
+      var picked = result.picked.map(function (q) { return { q: q.q }; });
+      beginSession(picked, {
+        role: role, category: category, difficulty: difficulty,
+        bankNote: result.insufficient
+          ? 'Only ' + picked.length + ' distinct fixed sample question(s) are available for this category, fewer than the ' + count + ' requested - showing all of them once instead of repeating any.'
+          : null
+      }, null);
     }
 
     function showCreateError(res) {
@@ -315,7 +331,10 @@
             setupStart.textContent = 'Start Interview';
             if (res.ok && res.data && Array.isArray(res.data.questions) && res.data.questions.length) {
               var picked = res.data.questions.map(function (q) { return { q: q.text, id: q.id }; });
-              beginSession(picked, { role: role, category: category, difficulty: difficulty, questionSource: res.data.question_source }, res.data.session_id);
+              beginSession(picked, {
+                role: role, category: category, difficulty: difficulty,
+                questionSource: res.data.question_source, bankNote: res.data.question_bank_note || null
+              }, res.data.session_id);
               return;
             }
             showCreateError(res);

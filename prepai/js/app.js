@@ -47,6 +47,28 @@
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape') setNav(false); });
 
     window.hydrateIcons();
+
+    // Surface login/registration clearly from every page's topbar, not just
+    // buried inside the Settings page's Account section - the settings.html
+    // page itself already shows the full account UI, so it skips this.
+    var tools = document.querySelector('.topbar-tools');
+    if (tools && window.PREP_API && body.getAttribute('data-page') !== 'settings') {
+      var accountLink = document.createElement('a');
+      accountLink.className = 'btn btn-outline btn-sm';
+      accountLink.href = 'settings.html#account-section';
+      accountLink.textContent = 'Log In';
+      tools.appendChild(accountLink);
+      window.PREP_API.me().then(function (res) {
+        if (res.ok && res.data && res.data.email) {
+          accountLink.textContent = res.data.email;
+          accountLink.title = 'Signed in - manage your account';
+        } else {
+          accountLink.textContent = 'Log In';
+          accountLink.title = 'Sign in or create an account';
+        }
+      });
+    }
+
     var run = window.PREP_PAGES && window.PREP_PAGES[body.getAttribute('data-page')];
     if (run) run();
   });

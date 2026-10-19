@@ -109,6 +109,14 @@ def _clean_questions(raw_questions, count: int):
         cleaned.append(text)
     if not cleaned:
         raise AIProviderInvalidResponse("the provider returned no usable questions")
+    if len(cleaned) < count:
+        # Never silently hand back fewer questions than requested and let a
+        # caller present it as if the full count were AI-generated - an
+        # under-delivering provider response is treated the same as any
+        # other invalid response.
+        raise AIProviderInvalidResponse(
+            "the provider returned {} usable question(s), fewer than the {} requested".format(len(cleaned), count)
+        )
     return cleaned[:count]
 
 

@@ -92,9 +92,26 @@ def test_empty_question_list_raises_invalid_response():
 
 def test_non_string_and_blank_entries_are_filtered_out():
     mixed = chat_response(["Real question?", "", "   ", 42, None, "Another real one?"])
-    result = ai_provider.generate_questions("Engineer", "behavioral", "easy", 5, client=FakeClient(response=mixed))
+    result = ai_provider.generate_questions("Engineer", "behavioral", "easy", 2, client=FakeClient(response=mixed))
     texts = [text for _qid, text in result]
     assert texts == ["Real question?", "Another real one?"]
+
+
+def test_fewer_usable_questions_than_requested_raises_invalid_response():
+    # The provider "succeeded" (200 OK) but only gave 2 usable questions for
+    # a request of 5 - this must be treated as a failure, not silently
+    # returned as a short-but-successful AI generation.
+    mixed = chat_response(["Real question?", "", "   ", 42, None, "Another real one?"])
+    with pytest.raises(ai_provider.AIProviderInvalidResponse):
+        ai_provider.generate_questions("Engineer", "behavioral", "easy", 5, client=FakeClient(response=mixed))
+
+
+def test_duplicate_questions_from_provider_are_deduplicated_then_validated():
+    # Only 2 distinct questions among 4 raw entries - requesting 3 must
+    # raise rather than pad the response with a repeated question.
+    dup = chat_response(["Same question?", "Same question?", "Another one?", "Another one?"])
+    with pytest.raises(ai_provider.AIProviderInvalidResponse):
+        ai_provider.generate_questions("Engineer", "technical", "easy", 3, client=FakeClient(response=dup))
 
 
 def test_provider_timeout():

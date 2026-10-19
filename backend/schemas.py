@@ -59,6 +59,7 @@ class InterviewOut(BaseModel):
     total_questions: int
     answered_count: int
     question_source: Literal["fixed", "ai"] = "fixed"
+    question_bank_note: Optional[str] = None
 
 
 class AnswerRequest(BaseModel):

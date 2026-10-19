@@ -21,5 +21,8 @@ backend/data/
 .DS_Store
 Thumbs.db
 
+# Local uvicorn run logs
+backend/uvicorn_*.log
+
 # Selenium test output (Selenium suite, see tests/selenium/README.md)
 /reports/
