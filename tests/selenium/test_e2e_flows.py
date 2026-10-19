@@ -54,6 +54,17 @@ class TestAccountAndInterviewFlow:
         wait.until(lambda d: "is-ok" in status_box.get_attribute("class"))
         assert "Backend connected" in driver.find_element(By.ID, "backend-status-text").text
 
+    def test_03b_topbar_login_link_visible_across_pages_when_logged_out(self, driver, wait, frontend_url):
+        # Every page that loads js/api.js must show an explicit "Log In"
+        # link in its topbar while logged out, pointed at the real login
+        # form - not just settings.html, which has its own full account UI.
+        for page in ("index.html", "achievements.html", "plan.html", "history.html", "analytics.html", "practice.html"):
+            goto(driver, frontend_url, page)
+            link = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, ".topbar-tools a")))
+            wait.until(lambda d, link=link: link.text.strip() == "Log In")
+            assert link.get_attribute("href").endswith("settings.html#account-section"), page
+        goto(driver, frontend_url, "settings.html")
+
     def test_04_malformed_email_is_rejected(self, driver, wait):
         driver.find_element(By.ID, "authEmail").clear()
         driver.find_element(By.ID, "authEmail").send_keys("not-an-email")
@@ -116,6 +127,13 @@ class TestAccountAndInterviewFlow:
         logged_in = wait.until(EC.visibility_of_element_located((By.ID, "account-loggedin")))
         assert driver.find_element(By.ID, "accountEmail").text == self.email
         assert logged_in.is_displayed()
+
+    def test_10b_topbar_shows_signed_in_email_across_pages_when_logged_in(self, driver, wait, frontend_url):
+        for page in ("index.html", "achievements.html", "plan.html", "history.html", "analytics.html", "practice.html"):
+            goto(driver, frontend_url, page)
+            link = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, ".topbar-tools a")))
+            wait.until(lambda d, link=link: link.text.strip() == self.email)
+            assert link.get_attribute("href").endswith("settings.html#account-section"), page
 
     def test_11_start_interview(self, driver, wait, frontend_url):
         goto(driver, frontend_url, "practice.html")
@@ -294,5 +312,43 @@ class TestOfflineDemoMode:
             result_box = wait.until(EC.visibility_of_element_located((By.ID, "result")))
             wait.until(lambda d: result_box.text.strip() != "")
             assert "(demo)" in result_box.text
+        finally:
+            backend_server.start()
+
+    def test_offline_demo_fifteen_questions_has_no_duplicates(self, driver, wait, frontend_url, backend_server):
+        # Regression test for "interview questions repeat", offline path:
+        # the frontend's own pickOfflineQuestions() mirror of the backend
+        # fix must also never repeat a question to pad out to 15.
+        backend_server.stop()
+        try:
+            goto(driver, frontend_url, "practice.html")
+            wait.until(EC.visibility_of_element_located((By.ID, "setup")))
+            Select(driver.find_element(By.ID, "setupRole")).select_by_visible_text("Software Engineer")
+            Select(driver.find_element(By.ID, "setupCategory")).select_by_value("technical")
+            Select(driver.find_element(By.ID, "setupDifficulty")).select_by_value("medium")
+            Select(driver.find_element(By.ID, "setupCount")).select_by_value("15")
+            driver.find_element(By.ID, "setupStart").click()
+
+            offline_btn = wait.until(EC.visibility_of_element_located((By.ID, "setupOfflineStart")))
+            offline_btn.click()
+
+            wait.until(EC.visibility_of_element_located((By.ID, "session")))
+            wait.until(lambda d: "Question 1 of 15" in d.find_element(By.ID, "qcount").text)
+
+            seen_questions = []
+            for i in range(1, 16):
+                wait.until(lambda d, i=i: f"Question {i} of 15" in d.find_element(By.ID, "qcount").text)
+                seen_questions.append(driver.find_element(By.ID, "question").text)
+                answer_box = driver.find_element(By.ID, "answer")
+                answer_box.clear()
+                answer_box.send_keys(f"Offline demo answer {i}.")
+                driver.find_element(By.ID, "submit").click()
+                if i == 15:
+                    wait.until(EC.alert_is_present())
+                    driver.switch_to.alert.accept()
+
+            assert len(seen_questions) == 15
+            assert len(set(seen_questions)) == 15, "offline 15-question demo repeated at least one question"
+            wait.until(EC.url_contains("results.html"))
         finally:
             backend_server.start()
