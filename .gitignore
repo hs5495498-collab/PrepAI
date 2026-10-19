@@ -20,3 +20,6 @@ backend/data/
 # OS
 .DS_Store
 Thumbs.db
+
+# Selenium test output (Selenium suite, see tests/selenium/README.md)
+/reports/

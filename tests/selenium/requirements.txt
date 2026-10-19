@@ -1,0 +1,6 @@
+# Selenium browser-test dependencies only - kept separate from
+# backend/requirements.txt so installing the backend's own six runtime
+# packages never pulls these in automatically. Install with:
+#   backend\.venv\Scripts\python.exe -m pip install -r tests\selenium\requirements.txt
+selenium
+pytest-html
