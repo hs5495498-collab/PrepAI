@@ -46,12 +46,35 @@ def _load_session(conn: sqlite3.Connection, session_id: str) -> dict:
     if interview is None:
         raise SessionNotFound(session_id)
     rows = conn.execute(
-        "SELECT q.id AS id, q.text AS text, a.answer_text AS answer_text "
-        "FROM questions q LEFT JOIN answers a "
-        "ON a.interview_id = q.interview_id AND a.question_id = q.id "
+        "SELECT q.id AS id, q.text AS text, a.answer_text AS answer_text, "
+        "ev.total_score AS eval_total_score, ev.relevance_score AS eval_relevance_score, "
+        "ev.correctness_score AS eval_correctness_score, ev.completeness_score AS eval_completeness_score, "
+        "ev.clarity_score AS eval_clarity_score, ev.strengths AS eval_strengths, "
+        "ev.weaknesses AS eval_weaknesses, ev.suggestions AS eval_suggestions, "
+        "ev.example_answer AS eval_example_answer, ev.created_at AS eval_created_at "
+        "FROM questions q "
+        "LEFT JOIN answers a ON a.interview_id = q.interview_id AND a.question_id = q.id "
+        "LEFT JOIN evaluations ev ON ev.interview_id = q.interview_id AND ev.question_id = q.id "
         "WHERE q.interview_id = ? ORDER BY q.position ASC",
         (session_id,),
     ).fetchall()
+    questions = []
+    for r in rows:
+        question = {"id": r["id"], "text": r["text"], "answer": r["answer_text"], "evaluation": None}
+        if r["eval_total_score"] is not None:
+            question["evaluation"] = {
+                "total_score": r["eval_total_score"],
+                "relevance_score": r["eval_relevance_score"],
+                "correctness_score": r["eval_correctness_score"],
+                "completeness_score": r["eval_completeness_score"],
+                "clarity_score": r["eval_clarity_score"],
+                "strengths": json.loads(r["eval_strengths"]),
+                "weaknesses": json.loads(r["eval_weaknesses"]),
+                "suggestions": json.loads(r["eval_suggestions"]),
+                "example_answer": r["eval_example_answer"],
+                "created_at": r["eval_created_at"],
+            }
+        questions.append(question)
     return {
         "id": interview["id"],
         "role": interview["role"],
@@ -62,7 +85,7 @@ def _load_session(conn: sqlite3.Connection, session_id: str) -> dict:
         "completed_at": interview["completed_at"],
         "question_source": interview["question_source"],
         "user_id": interview["user_id"],
-        "questions": [{"id": r["id"], "text": r["text"], "answer": r["answer_text"]} for r in rows],
+        "questions": questions,
     }
 
 
@@ -176,13 +199,17 @@ def get_question_for_evaluation(session_id: str, question_id: str) -> dict:
 
 
 def get_user_recommendation_data(user_id: int) -> dict:
-    """Returns only this account's own data for building recommendations:
-    how many interviews it has completed, and every evaluation attached to
-    an interview it owns (joined with that interview's category/difficulty).
-    Anonymous interviews (user_id IS NULL) and other accounts' interviews
-    are never included - the WHERE clause is the ownership boundary."""
+    """Returns only this account's own data for building recommendations
+    and analytics: its total interview count, how many it has completed,
+    and every evaluation attached to an interview it owns (joined with
+    that interview's category/difficulty). Anonymous interviews (user_id
+    IS NULL) and other accounts' interviews are never included - the
+    WHERE clause is the ownership boundary, enforced in SQL."""
     conn = db.connect()
     try:
+        total = conn.execute(
+            "SELECT COUNT(*) AS n FROM interviews WHERE user_id = ?", (user_id,)
+        ).fetchone()["n"]
         completed = conn.execute(
             "SELECT COUNT(*) AS n FROM interviews WHERE user_id = ? AND status = 'completed'", (user_id,)
         ).fetchone()["n"]
@@ -196,7 +223,44 @@ def get_user_recommendation_data(user_id: int) -> dict:
             "WHERE i.user_id = ? ORDER BY e.created_at ASC",
             (user_id,),
         ).fetchall()
-        return {"completed_interviews": completed, "evaluations": [dict(r) for r in rows]}
+        return {
+            "total_interviews": total,
+            "completed_interviews": completed,
+            "evaluations": [dict(r) for r in rows],
+        }
+    finally:
+        conn.close()
+
+
+def list_user_interviews(user_id: int, limit: int, offset: int):
+    """Returns (items, total) for this account's own interviews, newest
+    first, with per-interview answered/evaluated counts and average score
+    computed in the same query (one round trip, no N+1 pattern). Ownership
+    is enforced by the WHERE clause, not filtered after the fact."""
+    conn = db.connect()
+    try:
+        total = conn.execute(
+            "SELECT COUNT(*) AS n FROM interviews WHERE user_id = ?", (user_id,)
+        ).fetchone()["n"]
+        rows = conn.execute(
+            "SELECT i.id AS id, i.role AS role, i.category AS category, i.difficulty AS difficulty, "
+            "i.status AS status, i.question_count AS question_count, "
+            "i.created_at AS created_at, i.completed_at AS completed_at, "
+            "(SELECT COUNT(*) FROM answers a WHERE a.interview_id = i.id) AS answered_count, "
+            "(SELECT COUNT(*) FROM evaluations e WHERE e.interview_id = i.id) AS evaluated_count, "
+            "(SELECT AVG(e.total_score) FROM evaluations e WHERE e.interview_id = i.id) AS average_score "
+            "FROM interviews i WHERE i.user_id = ? "
+            "ORDER BY i.created_at DESC, i.id DESC LIMIT ? OFFSET ?",
+            (user_id, limit, offset),
+        ).fetchall()
+        items = [{
+            "session_id": r["id"], "role": r["role"], "category": r["category"], "difficulty": r["difficulty"],
+            "status": r["status"], "question_count": r["question_count"],
+            "answered_count": r["answered_count"], "evaluated_count": r["evaluated_count"],
+            "average_score": round(r["average_score"], 1) if r["average_score"] is not None else None,
+            "created_at": r["created_at"], "completed_at": r["completed_at"],
+        } for r in rows]
+        return items, total
     finally:
         conn.close()
 

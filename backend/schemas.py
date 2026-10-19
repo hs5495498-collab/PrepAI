@@ -29,10 +29,24 @@ class InterviewCreateRequest(BaseModel):
     question_count: int = Field(..., ge=1, le=15)
 
 
+class QuestionEvaluationOut(BaseModel):
+    total_score: int = Field(..., ge=0, le=100)
+    relevance_score: int = Field(..., ge=0, le=30)
+    correctness_score: int = Field(..., ge=0, le=35)
+    completeness_score: int = Field(..., ge=0, le=25)
+    clarity_score: int = Field(..., ge=0, le=10)
+    strengths: List[str]
+    weaknesses: List[str]
+    suggestions: List[str]
+    example_answer: Optional[str] = None
+    created_at: str
+
+
 class QuestionOut(BaseModel):
     id: str
     text: str
     answer: Optional[str] = None
+    evaluation: Optional[QuestionEvaluationOut] = None
 
 
 class InterviewOut(BaseModel):
@@ -116,3 +130,56 @@ class RecommendationsOut(BaseModel):
     recommendations: List[RecommendationOut]
     completed_interviews: int
     evaluated_answers: int
+
+
+class InterviewSummaryOut(BaseModel):
+    session_id: str
+    role: str
+    category: Category
+    difficulty: Difficulty
+    status: Literal["in_progress", "completed"]
+    question_count: int
+    answered_count: int
+    evaluated_count: int
+    average_score: Optional[float] = None
+    created_at: str
+    completed_at: Optional[str] = None
+
+
+class InterviewListOut(BaseModel):
+    interviews: List[InterviewSummaryOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class CategoryStatOut(BaseModel):
+    count: int
+    average_score: float
+
+
+class DimensionStatOut(BaseModel):
+    label: str
+    average: float
+    max: int
+
+
+class ProgressPointOut(BaseModel):
+    evaluated_at: str
+    score: int = Field(..., ge=0, le=100)
+
+
+class AnalyticsOut(BaseModel):
+    total_interviews: int
+    completed_interviews: int
+    evaluated_answers: int
+    completion_rate: Optional[float] = None
+    average_score: Optional[float] = None
+    highest_score: Optional[int] = None
+    most_recent_score: Optional[int] = None
+    by_category: dict[str, CategoryStatOut]
+    by_dimension: dict[str, DimensionStatOut]
+    strongest_dimension: Optional[str] = None
+    weakest_dimension: Optional[str] = None
+    progress: List[ProgressPointOut]
+    progress_sufficient: bool

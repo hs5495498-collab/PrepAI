@@ -12,6 +12,8 @@ official measurement; the evaluation response even says so in its own
 `note` field. **Personalized recommendations** (Phase 9) are a third,
 separate thing again: a deterministic, rule-based engine that reuses
 already-persisted evaluation data - it makes no AI calls of its own at all.
+**Personal history and analytics** (Phase 10) expose that same persisted
+data directly - also no AI calls, just database queries and arithmetic.
 
 ## What's implemented so far
 
@@ -23,6 +25,10 @@ already-persisted evaluation data - it makes no AI calls of its own at all.
   from the existing fixed sample bank - the response's `question_source`
   field (`"ai"` or `"fixed"`) always says which one honestly.
 - `GET /api/interviews/{session_id}` - read a session's current state.
+  Since Phase 10, each question's response also includes its persisted
+  `evaluation` (or `null` if that question was never evaluated).
+- `GET /api/interviews` - a paginated list of your own account's
+  interviews, newest first (Phase 10, see below).
 - `POST /api/interviews/{session_id}/answers` - submit one answer. Called
   once per question as you move past it in `practice.html`.
 - `POST /api/interviews/{session_id}/complete` - mark a session completed.
@@ -33,6 +39,9 @@ already-persisted evaluation data - it makes no AI calls of its own at all.
   score one already-submitted answer with AI feedback (Phase 8, see below).
 - `GET /api/recommendations` - a short, personalized list of what to
   practise next, built from your own evaluated answers (Phase 9, see below).
+- `GET /api/analytics` - your own account's aggregate stats: average/
+  highest/most-recent score, completion rate, category/dimension
+  breakdowns, and a score-over-time series (Phase 10, see below).
 - CORS restricted to `http://127.0.0.1:5500` (the frontend's Live Server
   origin), with `allow_credentials=True` so the session cookie works.
 
@@ -248,6 +257,76 @@ two small counters (`completed_interviews`, `evaluated_answers`). No answer
 text or personal data is sent anywhere - this endpoint doesn't call any
 external service.
 
+## Personal history and analytics (Phase 10)
+
+Both endpoints below require being logged in and only ever return the
+authenticated account's own data - there is no anonymous equivalent, and
+anonymous interviews (`user_id IS NULL`) are never attributed to any
+account, never counted in any account's totals, and never returned by
+either endpoint. Ownership is enforced by a SQL `WHERE user_id = ?` on
+every query (`storage.list_user_interviews`,
+`storage.get_user_recommendation_data`) - never filtered in Python after
+the fact. Neither endpoint calls an AI provider; both are plain database
+queries plus arithmetic.
+
+### `GET /api/interviews` - interview history
+
+Returns `{interviews: [...], total, limit, offset}`, newest first
+(`ORDER BY created_at DESC, id DESC` - the `id` tiebreak keeps ordering
+fully deterministic even when two interviews share the same timestamp).
+Query parameters:
+
+| Parameter | Default | Notes |
+|---|---|---|
+| `limit` | 20 | Clamped to the range 1-100 server-side regardless of what's requested. |
+| `offset` | 0 | Clamped to >= 0. |
+
+Each item includes `session_id`, `role`, `category`, `difficulty`,
+`status`, `question_count`, `answered_count`, `evaluated_count`,
+`average_score`, `created_at`, `completed_at`. `average_score` is the mean
+of `total_score` across *that interview's own* evaluated questions - it is
+`null` (never `0`) when that interview has zero evaluated questions, so an
+unevaluated interview is never mistaken for a scored-zero one. This is a
+single SQL statement per request (correlated subqueries for the three
+counts, not a separate round trip per interview), so listing a page of
+history is never an N+1 query pattern.
+
+### `GET /api/interviews/{session_id}` - interview detail (existing endpoint, extended)
+
+This route already existed (Phase 4.3) and is reused, not duplicated. As
+of Phase 10, each question in the response additionally carries an
+`evaluation` field - the same data `POST .../evaluate` returns, minus the
+redundant `session_id`/`question_id`, or `null` if that question was never
+evaluated. This is purely additive: the field was added with a default of
+`null`, so every caller that existed before Phase 10 (`practice.html`'s
+live session) is completely unaffected. Ownership uses the exact same
+`_check_ownership` check as every other interview route - another
+account's session ID returns the same `404 Interview session not found`
+a nonexistent ID would, never revealing that it exists.
+
+### `GET /api/analytics` - account-wide statistics
+
+Reuses `storage.get_user_recommendation_data()` - the exact same
+ownership-filtered query `/api/recommendations` already uses - rather than
+a second, parallel data-fetching path. `analytics.py` (pure functions, no
+DB/network access, just like `recommendations.py`) turns that into:
+
+| Field | Definition |
+|---|---|
+| `completion_rate` | `completed_interviews / total_interviews` (every interview the account has, completed or not). `null` when `total_interviews` is 0 - never shown as 0%, which would look like a failing grade rather than "no data." |
+| `average_score` | Mean of `total_score` across every **evaluated answer**, not an average of per-interview averages - an interview with more evaluated questions contributes proportionally more. This is the same definition `/api/interviews`' per-item `average_score` uses, just computed across the whole account instead of one interview. |
+| `highest_score` / `most_recent_score` | Both drawn only from evaluated answers; "most recent" is by the answer's own evaluation timestamp, not the interview's creation date. |
+| `by_category` | Only categories with at least one evaluated answer appear at all - a category you've never attempted is never listed, let alone implied to be weak. |
+| `by_dimension` | Always present (when `evaluated_answers > 0`) for all four rubric dimensions, since every evaluated answer has a value for each one. |
+| `strongest_dimension` / `weakest_dimension` | `null` unless there are at least 3 evaluated answers (`recommendations.MIN_SAMPLES_FOR_TREND`, reused rather than a second magic number) - avoids calling something "your strongest area" from a single lucky answer. |
+| `progress` | One `{evaluated_at, score}` point per evaluated answer, in chronological order - this is what the frontend charts. |
+| `progress_sufficient` | `true` only when there are 2+ points - a single data point cannot show a trend, so the frontend shows an explanation instead of a one-dot "chart" when this is `false`. |
+
+Missing evaluations are never treated as a score of `0` anywhere in this
+module - an account with interviews but no evaluations gets `evaluated_answers: 0`
+and every score field `null`, not a wall of zeroes that would look like
+poor performance.
+
 ## How the frontend uses this API
 
 `prepai/js/api.js` (`window.PREP_API`) is the only place the backend URL is
@@ -283,17 +362,40 @@ logged in, it shows a plain sign-in prompt instead of an error. If the
 request fails, it shows a message and a "Try again" button rather than a
 blank or broken section.
 
+On `history.html` (Phase 10), a new **"Your Account History"** section
+calls `GET /api/interviews` and loads automatically for the same reason -
+no AI call, no cost. The **existing table below it is completely
+unchanged** and still reads only `P.attempts`/`localStorage`; it has just
+been relabeled "Local Browser History (This Device Only)" so the two are
+never confused. Each account-history row links to
+`results.html?session=<real backend session_id>` - a **new** way to open
+`results.html` that fetches live from the backend (via the now-extended
+`GET /api/interviews/{session_id}`), completely independent of
+`localStorage`. The original `results.html?id=<localStorage demo id>` path
+is untouched. This is what makes account history actually useful across
+devices: a `localStorage` id from one browser means nothing on another
+device, but a `?session=` link works anywhere you're logged into the same
+account.
+
+On `analytics.html` (Phase 10), a new **"Your Account Analytics"** section
+calls `GET /api/analytics` and renders real metrics, a category/dimension
+breakdown, and (only when there are 2+ evaluated answers) a progress chart
+reusing the existing `createChart()` from `chart.js` - no new charting code
+or library was added. The pre-existing sample-data metrics/chart/two-col
+sections above it are completely unchanged.
+
 ## What's NOT implemented yet (future phases)
 
 - **No "re-evaluate" button.** The first successful evaluation of a
   question is permanent - see "Idempotency" above.
 - **No social login, email verification, or password reset.** Accounts are
   email+password only (see "Authentication and accounts" below).
-- No way to resume a backend session after a page refresh - if you reload
-  `practice.html` mid-interview, that in-progress session (backend or
-  offline) is lost. (The *data* for an already-created session does survive
-  on the server side as of Phase 6 - there is just no frontend feature yet
-  to look an old, unfinished session back up by its ID after a refresh.)
+- No way to **resume an in-progress** interview after a page refresh - if
+  you reload `practice.html` mid-interview, that session's live UI state is
+  lost (though its data is safe on the server). As of Phase 10, you *can*
+  look up a session afterward - via "Your Account History" on
+  `history.html`, logged in - to see whatever was answered and evaluate
+  it; you just can't resume typing where you left off.
 - No retry logic for AI requests - a single failed attempt returns an error
   immediately rather than silently retrying (and re-billing).
 - **No dismissed/tracked recommendations.** There's no way to mark a
@@ -302,6 +404,13 @@ blank or broken section.
   as documented future work rather than added speculatively this phase.
 - **No optional AI-generated wording for recommendations.** See
   "Personalized recommendations" above for why this was skipped.
+- **No per-interview detail page for the legacy localStorage demo
+  attempts' backend data.** They never had one - Phase 10 adds server
+  history for *new* attempts going forward, it doesn't retroactively
+  attach old local-only attempts to the server.
+- **No search or filtering on account history yet** - just newest-first
+  pagination. The legacy local table above it keeps its own existing
+  date-range/type filters, unchanged.
 
 ## Database (Phase 6)
 
@@ -508,7 +617,8 @@ needing to know about it.
 | `ai_provider.py` | The AI question-generation service (OpenAI), isolated from the route handlers. Validates input, makes one request with a timeout, validates the output, never logs the API key. |
 | `evaluation_provider.py` | The AI answer-evaluation service (Phase 8) - separate file, separate flag, separate exception types from `ai_provider.py`. Computes the 0-100 total itself rather than trusting the model's arithmetic; never logs the API key or the candidate's answer. |
 | `recommendations.py` | The deterministic recommendation engine (Phase 9) - pure functions, no DB access and no AI calls at all; takes already-fetched, already-owned data in and returns a ranked recommendation list out. |
-| `schemas.py` | Pydantic models that validate requests and shape responses, including `question_source`, `RegisterRequest`/`LoginRequest`/`UserOut`, `EvaluationOut`, `RecommendationOut`/`RecommendationsOut`. |
+| `analytics.py` | Pure analytics calculations (Phase 10) - same no-DB, no-network pattern as `recommendations.py`, and reuses its constants rather than duplicating them. |
+| `schemas.py` | Pydantic models that validate requests and shape responses, including `question_source`, `RegisterRequest`/`LoginRequest`/`UserOut`, `EvaluationOut`, `RecommendationOut`/`RecommendationsOut`, `InterviewSummaryOut`/`InterviewListOut`, `AnalyticsOut`. |
 | `questions.py` | Small sample question bank (Technical/HR/Behavioral), mirroring `prepai/js/data.js`. Used whenever AI generation is off or unavailable. |
 | `tests/test_api.py` | Automated pytest tests covering the interview API, including AI-enabled/disabled/failure cases and a database-error case (all mocked). |
 | `tests/test_ai_provider.py` | Unit tests for `ai_provider.py` using a fake HTTP client - no real network calls, no API key, no cost. |
@@ -516,6 +626,9 @@ needing to know about it.
 | `tests/test_evaluation_api.py` | API-level evaluation tests: persistence, idempotency, failed-evaluation-saves-nothing, ownership isolation, CSRF, anonymous access. |
 | `tests/test_recommendations.py` | Pure logic tests for `recommendations.py`: weak/strong/inconsistent detection, missing-data handling, ordering determinism, recommendation count limit - no DB, no network. |
 | `tests/test_recommendations_api.py` | API-level tests: authentication required, cross-account privacy, anonymous interviews never attributed, database-error handling. |
+| `tests/test_history_api.py` | `GET /api/interviews` (list + pagination + ownership + counts) and the extended `GET /api/interviews/{id}` (per-question evaluations, privacy). |
+| `tests/test_analytics.py` | Pure logic tests for `analytics.py`: correct aggregates, missing-data-not-zero, determinism, minimum-sample gating - no DB, no network. |
+| `tests/test_analytics_api.py` | API-level tests: authentication required, cross-account isolation, anonymous exclusion. |
 | `tests/test_storage.py` | Tests for the SQLite persistence layer directly: schema, ordering, duplicate rejection, foreign keys, transaction rollback, and restart simulation. |
 | `tests/test_auth.py` | Registration, login, logout, session expiry, CSRF enforcement, and cross-account ownership isolation tests. |
 | `tests/conftest.py` | Points every test at its own temporary database file, so running the test suite never touches `backend/data/prepai.db`. |
@@ -625,6 +738,12 @@ curl.exe -b jar.txt http://127.0.0.1:8000/api/auth/me
 
 # 4. See your recommendations (free - no AI call, works with zero evaluations)
 curl.exe -b jar.txt http://127.0.0.1:8000/api/recommendations
+
+# 5. See your interview history (paginated, newest first)
+curl.exe -b jar.txt "http://127.0.0.1:8000/api/interviews?limit=10&offset=0"
+
+# 6. See your account-wide analytics
+curl.exe -b jar.txt http://127.0.0.1:8000/api/analytics
 ```
 
 ### Example: evaluating an answer (only after you set AI_EVALUATION_ENABLED=true and a real key - see "AI answer evaluation" above; this makes a real, paid request)
@@ -684,3 +803,5 @@ status codes:
 | Re-evaluating an already-evaluated question | 200 - returns the existing stored result, not an error |
 | `GET /api/recommendations` with no valid session (recommendations have no anonymous equivalent) | 401 |
 | `GET /api/recommendations` for an account with no completed interviews, or interviews but no evaluations | 200 - a generic, clearly-labeled recommendation, not an error |
+| `GET /api/interviews` or `GET /api/analytics` with no valid session (no anonymous equivalent) | 401 |
+| `GET /api/interviews` or `GET /api/analytics` for an account with no interviews/evaluations | 200 - an honest empty/null response, never an error or a fabricated zero |

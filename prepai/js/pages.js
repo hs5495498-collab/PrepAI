@@ -374,7 +374,71 @@
       if (tr) location.href = tr.getAttribute('data-href');
     });
     draw();
+    renderAccountHistory();
   };
+
+  /* Server-persisted account history (Phase 10) - entirely separate from
+     the legacy localStorage table above. Never mixes the two: a backend
+     interview is only ever shown here, using its real session_id; the
+     table above keeps reading only P.attempts/localStorage, unchanged. */
+  function renderAccountHistory() {
+    var body = $('#account-history-body');
+    if (!body) return;
+    var limit = 10, offset = 0, accumulated = [];
+
+    function row(item) {
+      var scoreCell = item.average_score != null
+        ? item.average_score + ' / 100' + (item.evaluated_count < item.question_count ? ' (' + item.evaluated_count + ' of ' + item.question_count + ' evaluated)' : '')
+        : (item.evaluated_count === 0 ? '— not evaluated' : '—');
+      var statusLabel = item.status === 'completed' ? 'Completed' : 'In Progress';
+      return '<tr data-href="results.html?session=' + encodeURIComponent(item.session_id) + '">' +
+        '<td data-label="Date">' + P.fmt(new Date(item.created_at), true) + '</td>' +
+        '<td data-label="Role">' + esc(item.role) + '</td>' +
+        '<td data-label="Category">' + cap(item.category) + ' · ' + cap(item.difficulty) + '</td>' +
+        '<td data-label="Status">' + statusLabel + ' (' + item.answered_count + '/' + item.question_count + ' answered)</td>' +
+        '<td data-label="Score">' + scoreCell + '</td>' +
+        '<td><a class="view-link" href="results.html?session=' + encodeURIComponent(item.session_id) + '">View' + icon('chevron', 16) + '</a></td></tr>';
+    }
+
+    function renderList(total) {
+      if (!accumulated.length) {
+        body.innerHTML = '<p class="muted">You haven’t completed any practice interviews on your account yet. <a class="link" href="practice.html">Start one now</a>.</p>';
+        return;
+      }
+      body.innerHTML = '<table class="table"><thead><tr><th>Date</th><th>Role</th><th>Category</th><th>Status</th><th>Score</th><th><span class="sr-only">View details</span></th></tr></thead>' +
+        '<tbody>' + accumulated.map(row).join('') + '</tbody></table>' +
+        (accumulated.length < total ? '<div class="table-foot"><button class="btn btn-secondary" id="accountHistoryMore" type="button">Load more</button></div>' : '');
+      var moreBtn = $('#accountHistoryMore');
+      if (moreBtn) moreBtn.addEventListener('click', function () { offset += limit; load(true); });
+      var table = $('table', body);
+      table.addEventListener('click', function (e) {
+        if (e.target.closest('a')) return;
+        var tr = e.target.closest('tr[data-href]');
+        if (tr) location.href = tr.getAttribute('data-href');
+      });
+    }
+
+    function load(append) {
+      if (!append) body.innerHTML = '<p class="muted">Loading your account history…</p>';
+      window.PREP_API.listInterviews(limit, offset).then(function (res) {
+        if (res.status === 401) {
+          body.innerHTML = '<div class="notice">Sign in on the <a class="link" href="settings.html">Settings</a> page to see interviews saved to your account.</div>';
+          return;
+        }
+        if (!res.ok || !res.data) {
+          body.innerHTML = '<div class="notice">Could not load your account history' +
+            (res.status === 0 ? ' — make sure the backend is running.' : '.') +
+            ' <button class="btn btn-secondary btn-sm" type="button" id="accountHistoryRetry" style="margin-left:8px">Try again</button></div>';
+          var retry = $('#accountHistoryRetry');
+          if (retry) retry.addEventListener('click', function () { offset = 0; accumulated = []; load(false); });
+          return;
+        }
+        accumulated = append ? accumulated.concat(res.data.interviews) : res.data.interviews;
+        renderList(res.data.total);
+      });
+    }
+    load(false);
+  }
 
   /* ---------------- 4. Progress analytics ---------------- */
   pages.analytics = function () {
@@ -443,7 +507,82 @@
     }).join('');
     draw();
     renderRecommendations();
+    renderAccountAnalytics();
   };
+
+  /* Account analytics (Phase 10) - calculated server-side from the signed-in
+     account's own completed interviews and evaluated answers, entirely
+     separate from the sample P.skills-driven metrics/chart/two-col above.
+     Free and read-only, so (like recommendations) it loads automatically. */
+  function renderAccountAnalytics() {
+    var body = $('#account-analytics-body');
+    if (!body) return;
+    body.innerHTML = '<p class="muted">Loading your analytics…</p>';
+    window.PREP_API.getAnalytics().then(function (res) {
+      if (res.status === 401) {
+        body.innerHTML = '<div class="notice">Sign in on the <a class="link" href="settings.html">Settings</a> page to see analytics calculated from your own account.</div>';
+        return;
+      }
+      if (!res.ok || !res.data) {
+        body.innerHTML = '<div class="notice">Could not load your analytics' +
+          (res.status === 0 ? ' — make sure the backend is running.' : '.') +
+          ' <button class="btn btn-secondary btn-sm" type="button" id="analyticsRetry" style="margin-left:8px">Try again</button></div>';
+        var retry = $('#analyticsRetry');
+        if (retry) retry.addEventListener('click', renderAccountAnalytics);
+        return;
+      }
+      var d = res.data;
+      if (d.evaluated_answers === 0) {
+        body.innerHTML = '<p class="muted">' + (d.total_interviews === 0
+          ? 'You haven’t completed any practice interviews on your account yet. <a class="link" href="practice.html">Start one now</a>.'
+          : 'You have ' + d.total_interviews + ' interview(s) on your account, but none of your answers have been evaluated yet. Open a result and click "Evaluate with AI" to build up your analytics.') + '</p>';
+        return;
+      }
+      var out = '<div class="metrics" style="margin-bottom:24px">' +
+        metric('Average Score', d.average_score, 'across ' + d.evaluated_answers + ' evaluated answer' + (d.evaluated_answers === 1 ? '' : 's')) +
+        metric('Highest Score', d.highest_score, 'out of 100') +
+        metric('Most Recent Score', d.most_recent_score, 'out of 100') +
+        metric('Completion Rate', d.completion_rate != null ? Math.round(d.completion_rate * 100) + '%' : '—',
+          d.completed_interviews + ' of ' + d.total_interviews + ' interviews completed') +
+        '</div>';
+
+      var catEntries = Object.keys(d.by_category);
+      if (catEntries.length) {
+        out += '<div class="two-col" style="margin-bottom:24px"><div><h4 class="section-title">By Category</h4><ul class="plain-list">' +
+          catEntries.map(function (cat) {
+            var c = d.by_category[cat];
+            return '<li><span>' + cap(cat) + '</span><span>' + c.average_score + ' / 100 <span class="muted">(' + c.count + ' evaluated)</span></span></li>';
+          }).join('') + '</ul></div>';
+        out += '<div><h4 class="section-title">By Dimension</h4><ul class="plain-list">' +
+          Object.keys(d.by_dimension).map(function (field) {
+            var dim = d.by_dimension[field];
+            var tag = field === d.strongest_dimension ? ' <span class="row-change pos" style="width:auto">strongest</span>'
+              : field === d.weakest_dimension ? ' <span class="row-change neg" style="width:auto">weakest</span>' : '';
+            return '<li><span>' + esc(dim.label) + tag + '</span><span>' + dim.average + ' / ' + dim.max + '</span></li>';
+          }).join('') + '</ul>' +
+          (d.strongest_dimension ? '' : '<p class="muted" style="font-size:.8125rem;margin-top:8px">Evaluate a few more answers to see your strongest/weakest area highlighted.</p>') +
+          '</div></div>';
+      }
+
+      out += '<div><h4 class="section-title" style="margin-bottom:12px">Score Progress</h4>';
+      if (!d.progress_sufficient) {
+        out += '<p class="muted">Evaluate at least 2 answers (on different occasions) to see a progress chart - right now there' +
+          (d.progress.length === 0 ? ' are none yet.' : ' is only 1.') + '</p>';
+      } else {
+        out += '<div id="account-analytics-chart"></div>';
+      }
+      out += '</div>';
+      body.innerHTML = out;
+
+      if (d.progress_sufficient) {
+        createChart($('#account-analytics-chart'), {
+          points: d.progress.map(function (p) { return { date: new Date(p.evaluated_at), score: p.score }; }),
+          height: 240,
+          ariaLabel: 'Line chart of your evaluated-answer scores over time'
+        });
+      }
+    });
+  }
 
   /* Personalized recommendations (Phase 9) - read-only and free (this
      endpoint never calls an AI provider, so there is no cost concern in
@@ -527,6 +666,8 @@
 
   /* ---------------- 7. Detailed results ---------------- */
   pages.results = function () {
+    var sessionParam = new URLSearchParams(location.search).get('session');
+    if (sessionParam) { renderBackendSession(sessionParam); return; }
     var id = new URLSearchParams(location.search).get('id');
     var a = P.attempts.filter(function (x) { return x.id === id; })[0];
     if (!a) { var c = P.completed(); a = c[c.length - 1]; }
@@ -579,6 +720,50 @@
     wireEvaluateButtons();
   };
 
+  /* Server-persisted interview results (Phase 10), reached via
+     results.html?session=<real backend session_id> - used by the new
+     "Your Account History" list on history.html. Completely separate
+     from the ?id=<localStorage demoId> path above, which is untouched. */
+  function renderBackendSession(sessionId) {
+    $('#result').innerHTML = '<p class="muted">Loading your interview…</p>';
+    window.PREP_API.getInterview(sessionId).then(function (res) {
+      if (res.status === 401 || res.status === 404) {
+        $('#result').innerHTML = '<div class="notice">This interview could not be found, or you don’t have access to it. <a class="link" href="history.html">Back to Interview History</a></div>';
+        return;
+      }
+      if (!res.ok || !res.data) {
+        $('#result').innerHTML = '<div class="notice">Could not load this interview' +
+          (res.status === 0 ? ' — make sure the backend is running.' : '.') + ' <a class="link" href="history.html">Back to Interview History</a></div>';
+        return;
+      }
+      var data = res.data;
+      var evaluated = data.questions.filter(function (q) { return q.evaluation; });
+      var avg = evaluated.length
+        ? Math.round(evaluated.reduce(function (s, q) { return s + q.evaluation.total_score; }, 0) / evaluated.length * 10) / 10
+        : null;
+      var out = '<div><div class="eyebrow">Interview Results</div><h2 class="page-heading" style="margin-top:6px">' +
+        cap(data.category) + ' Interview — ' + esc(data.role) + '</h2>' +
+        '<p class="subtle">' + cap(data.difficulty) + ' difficulty · ' + (data.status === 'completed' ? 'Completed' : 'In progress') + '</p></div>';
+      out += '<div class="notice">Saved to your account on the server. Any score shown is an AI-generated estimate for practice, never an objective evaluation - see each question for the full breakdown.</div>';
+      if (avg != null) {
+        out += '<div class="score-row"><div class="big-score">' + avg + '<span>/ 100 average</span></div>' +
+          '<div class="score-meta"><p class="muted">Average across ' + evaluated.length + ' of ' + data.questions.length + ' evaluated question(s)</p></div></div>';
+      }
+      out += '<div><h3 class="section-title">Questions &amp; Answers</h3><div class="qa-list">' +
+        data.questions.map(function (q, i) {
+          var answered = !!(q.answer && q.answer.trim());
+          var body = answered ? esc(q.answer) : '<em>No answer submitted.</em>';
+          body += q.evaluation ? renderEvaluation(q.evaluation) : evalBlock(sessionId, { id: q.id }, i, answered);
+          return '<details class="qa"><summary><span class="muted">Q' + (i + 1) + '</span><span class="row-title">' + esc(q.text) +
+            '</span><strong>' + (q.evaluation ? q.evaluation.total_score : '') + '</strong><span class="chev">' + icon('chevron', 16) + '</span></summary>' +
+            '<div class="qa-body">' + body + '</div></details>';
+        }).join('') + '</div></div>';
+      out += '<div class="actions"><a class="btn btn-secondary" href="history.html">Back to Interview History</a></div>';
+      $('#result').innerHTML = out;
+      wireEvaluateButtons();
+    });
+  }
+
   /* AI answer evaluation (Phase 8) - an explicit per-question action, never
      automatic, so viewing results never silently triggers a paid AI call. */
   function evalBlock(sessionId, q, i, answered) {
@@ -588,10 +773,11 @@
       '<p class="hint" data-eval-hint="' + i + '"></p>' +
       '<div data-eval-result="' + i + '"></div></div>';
   }
+  var DEFAULT_EVAL_NOTE = 'AI-generated estimate for practice purposes - not an objective or official assessment.';
   function renderEvaluation(ev) {
     function list(items) { return '<ul class="bullets">' + items.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul>'; }
     return '<div class="score-row"><div class="big-score" style="font-size:2.5rem">' + ev.total_score + '<span>/ 100</span></div>' +
-      '<div class="score-meta"><p class="muted">' + esc(ev.note) + '</p></div></div>' +
+      '<div class="score-meta"><p class="muted">' + esc(ev.note || DEFAULT_EVAL_NOTE) + '</p></div></div>' +
       '<div class="eval-dims">' +
         '<span><strong>' + ev.relevance_score + '</strong>/30 Relevance</span>' +
         '<span><strong>' + ev.correctness_score + '</strong>/35 Correctness</span>' +

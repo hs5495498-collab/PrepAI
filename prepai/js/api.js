@@ -74,6 +74,10 @@
         {}, 30000
       );
     },
-    getRecommendations: function () { return request('/api/recommendations'); }
+    getRecommendations: function () { return request('/api/recommendations'); },
+    listInterviews: function (limit, offset) {
+      return request('/api/interviews?limit=' + encodeURIComponent(limit || 20) + '&offset=' + encodeURIComponent(offset || 0));
+    },
+    getAnalytics: function () { return request('/api/analytics'); }
   };
 })();

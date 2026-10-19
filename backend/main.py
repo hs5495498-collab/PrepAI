@@ -9,17 +9,20 @@ from fastapi.responses import JSONResponse
 load_dotenv()
 
 import ai_provider
+import analytics
 import auth
 import evaluation_provider
 import recommendations
 import storage
 from questions import pick_questions
 from schemas import (
+    AnalyticsOut,
     AnswerRequest,
     AnswerResponse,
     CompletionResponse,
     EvaluationOut,
     InterviewCreateRequest,
+    InterviewListOut,
     InterviewOut,
     LoginRequest,
     RecommendationsOut,
@@ -199,6 +202,20 @@ def create_interview(payload: InterviewCreateRequest, request: Request, user: Op
     return _to_interview_out(session)
 
 
+MAX_HISTORY_LIMIT = 100
+DEFAULT_HISTORY_LIMIT = 20
+
+
+@app.get("/api/interviews", response_model=InterviewListOut)
+def list_interviews(user: dict = Depends(require_user), limit: int = DEFAULT_HISTORY_LIMIT, offset: int = 0):
+    # require_user - history is always tied to a real account; anonymous
+    # interviews are intentionally excluded (see storage.list_user_interviews).
+    limit = max(1, min(limit, MAX_HISTORY_LIMIT))
+    offset = max(0, offset)
+    items, total = storage.list_user_interviews(user["id"], limit, offset)
+    return InterviewListOut(interviews=items, total=total, limit=limit, offset=offset)
+
+
 @app.get("/api/interviews/{session_id}", response_model=InterviewOut)
 def get_interview(session_id: str, user: Optional[dict] = Depends(get_current_user_optional)):
     try:
@@ -312,3 +329,12 @@ def get_recommendations(user: dict = Depends(require_user)):
         completed_interviews=data["completed_interviews"],
         evaluated_answers=len(data["evaluations"]),
     )
+
+
+@app.get("/api/analytics", response_model=AnalyticsOut)
+def get_analytics(user: dict = Depends(require_user)):
+    # Reuses the exact same ownership-filtered query as /api/recommendations
+    # (storage.get_user_recommendation_data) rather than a second data path.
+    data = storage.get_user_recommendation_data(user["id"])
+    summary = analytics.build_summary(data["total_interviews"], data["completed_interviews"], data["evaluations"])
+    return AnalyticsOut(**summary)

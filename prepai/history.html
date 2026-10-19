@@ -21,8 +21,16 @@
     </header>
     <main class="content">
 
-      <section>
-        <p class="summary-compact" id="summary"></p>
+      <section class="group" id="account-history-section" style="border-top:0;padding-top:0">
+        <h3 class="section-title">Your Account History</h3>
+        <p class="subtle" style="margin-top:4px">Interviews saved to your account on the server — available on any device you sign in from.</p>
+        <div id="account-history-body" style="margin-top:16px"></div>
+      </section>
+
+      <section class="group">
+        <h3 class="section-title">Local Browser History (This Device Only)</h3>
+        <p class="subtle" style="margin-top:4px">Demo attempts kept only in this browser's storage — not tied to any account, and not visible from a different device or browser.</p>
+        <p class="summary-compact" id="summary" style="margin-top:12px"></p>
         <table class="table" style="margin-top:16px">
           <thead><tr><th>Date</th><th>Interview Type</th><th>Score</th><th>Result</th><th>Change</th><th><span class="sr-only">View details</span></th></tr></thead>
           <tbody id="rows"></tbody>
@@ -34,6 +42,7 @@
   <script src="js/icons.js"></script>
   <script src="js/data.js"></script>
   <script src="js/chart.js"></script>
+  <script src="js/api.js"></script>
   <script src="js/pages.js"></script>
   <script src="js/app.js"></script>
 </body>
