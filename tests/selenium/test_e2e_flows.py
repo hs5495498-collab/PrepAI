@@ -505,10 +505,19 @@ class TestPracticeRecommendation:
         wait.until(lambda d: "Loading" not in reco.text)
         assert "Sign in" in reco.text
         assert "Start Recommended Session" in reco.text
+        # The card's own tags state what it will start - Phase 2B check
+        # that this is truthful, not just present.
+        assert "Technical" in reco.text
+        assert "Easy difficulty" in reco.text
+        assert "5 questions" in reco.text
 
         driver.find_element(By.ID, "recoStartBtn").click()
         wait.until(EC.visibility_of_element_located((By.ID, "session")))
         wait.until(lambda d: "Question 1 of 5" in d.find_element(By.ID, "qcount").text)
+        # The actual created session must match what the card promised -
+        # not just "some" fixed session.
+        qcount_text = driver.find_element(By.ID, "qcount").text
+        assert "Technical" in qcount_text and "Easy" in qcount_text
         assert "fixed question bank" in driver.find_element(By.ID, "sessionMode").text
 
     def test_logged_in_zero_history_shows_real_backend_text_and_updates_after_a_completed_interview(self, driver, wait, frontend_url):
@@ -536,6 +545,18 @@ class TestPracticeRecommendation:
                 driver.switch_to.alert.accept()
         wait.until(EC.url_contains("results.html"))
 
+        # Phase 2B: the results page reached via the recommended-session
+        # path must show the actual returned result, not a blank/stuck page -
+        # including the real submitted answer text once expanded (same
+        # technique as test_13_interview_completion_shows_results).
+        result_box = wait.until(EC.visibility_of_element_located((By.ID, "result")))
+        wait.until(lambda d: result_box.text.strip() != "")
+        assert "(demo)" in result_box.text
+        first_qa = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#result details.qa")))
+        driver.execute_script("arguments[0].open = true;", first_qa)
+        qa_body_text = first_qa.find_element(By.CSS_SELECTOR, ".qa-body").text
+        assert "Answer 1." in qa_body_text
+
         # Real account history changed (one completed interview, still zero
         # evaluations since AI is disabled for this suite) - the card must
         # reflect that honestly with the backend's own distinct wording,
@@ -548,6 +569,16 @@ class TestPracticeRecommendation:
         assert "Complete your first practice interview" not in reco2.text
 
     def test_start_recommended_session_rapid_double_click_creates_only_one_interview(self, driver, wait, frontend_url):
+        # Root-caused in Phase 2B: on a fast localhost backend, the first
+        # click's entire request/response cycle can complete *faster* than
+        # the WebDriver round-trip needed to issue a second Python click()
+        # call - so by the time the second click arrives, the transient
+        # `creating` in-flight flag has already legitimately reset to
+        # false, and the stale (now-hidden) card button's listener would
+        # happily start a second, independent interview. The real fix is
+        # pages.js's `sessionStarted` latch, set permanently once inside
+        # beginSession() - not the transient in-flight flag alone - see
+        # startFromCard() in prepai/js/pages.js.
         register(driver, wait, frontend_url, unique_email())
 
         goto(driver, frontend_url, "practice.html")
@@ -560,7 +591,7 @@ class TestPracticeRecommendation:
         try:
             driver.find_element(By.ID, "recoStartBtn").click()
         except Exception:
-            pass  # already disabled/removed by the first click - acceptable
+            pass  # already disabled/hidden/removed by the first click - acceptable
         wait.until(EC.visibility_of_element_located((By.ID, "session")))
         wait.until(lambda d: "of 5" in d.find_element(By.ID, "qcount").text)
 
@@ -599,3 +630,48 @@ class TestPracticeRecommendation:
             wait.until(lambda d: "Question 1 of 5" in d.find_element(By.ID, "qcount").text)
         finally:
             driver.set_window_size(1366, 900)
+
+    def test_start_recommended_session_failure_does_not_leave_button_stuck(self, driver, wait, frontend_url, backend_server):
+        # Phase 2B: a failed interview-creation attempt (backend unreachable
+        # right at the moment Start is clicked) must recover the button -
+        # never leave it disabled/"Starting..." forever, and never fail
+        # silently.
+        goto(driver, frontend_url, "practice.html")
+        wait.until(EC.visibility_of_element_located((By.ID, "setup")))
+        reco = wait.until(EC.visibility_of_element_located((By.ID, "recommendation")))
+        wait.until(lambda d: "Loading" not in reco.text)
+
+        backend_server.stop()
+        try:
+            driver.find_element(By.ID, "recoStartBtn").click()
+            wait.until(lambda d: d.find_element(By.ID, "recoStartBtn").get_attribute("disabled") is None)
+            recovered_btn = driver.find_element(By.ID, "recoStartBtn")
+            assert recovered_btn.text == "Start Recommended Session"
+            assert recovered_btn.is_enabled()
+            # The setup form's own error message must also appear, not a
+            # silent/stuck failure.
+            wait.until(lambda d: d.find_element(By.ID, "setupHint").text.strip() != "")
+            # #setup must still be the visible panel, not stuck on #session.
+            assert driver.find_element(By.ID, "setup").is_displayed()
+        finally:
+            backend_server.start()
+
+    def test_no_horizontal_overflow_at_demo_viewport_sizes(self, driver, wait, frontend_url):
+        # Phase 2B UI-quality check: the most common symptom of broken
+        # responsive CSS (text/elements overflowing the viewport, forcing
+        # an unwanted horizontal scrollbar) at the two sizes the demo will
+        # actually be shown at.
+        for width, height in [(1366, 768), (390, 844)]:
+            driver.set_window_size(width, height)
+            try:
+                goto(driver, frontend_url, "practice.html")
+                wait.until(EC.visibility_of_element_located((By.ID, "setup")))
+                reco = wait.until(EC.visibility_of_element_located((By.ID, "recommendation")))
+                wait.until(lambda d: "Loading" not in reco.text)
+                overflow = driver.execute_script(
+                    "return document.documentElement.scrollWidth - document.documentElement.clientWidth;"
+                )
+                assert overflow <= 1, f"horizontal overflow of {overflow}px on practice.html at {width}x{height}"
+                assert driver.find_element(By.ID, "recoStartBtn").is_displayed()
+            finally:
+                driver.set_window_size(1366, 900)

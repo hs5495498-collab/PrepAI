@@ -84,7 +84,8 @@
 
     var list = [], meta = null, i = 0, seconds = 0, paused = false, recording = false,
         answers = [], recordedFlags = [], tickHandle = null,
-        backendId = null, submittedToBackend = [], creating = false, submitting = false;
+        backendId = null, submittedToBackend = [], creating = false, submitting = false,
+        sessionStarted = false;
 
     function startTimer() {
       if (tickHandle) return;
@@ -248,6 +249,13 @@
     }
 
     function beginSession(newList, newMeta, backendSessionId) {
+      // Permanent latch (never reset) - unlike `creating`, which only
+      // guards one in-flight request and is reset the instant it resolves,
+      // this stays true for the rest of this page load once any session
+      // has actually started, so a stale/late click on the recommendation
+      // card's button (e.g. one dispatched just before this ran) can never
+      // start a second, independent interview - see startFromCard() below.
+      sessionStarted = true;
       list = newList; meta = newMeta; i = 0; seconds = 0; paused = false;
       answers = []; recordedFlags = []; submittedToBackend = [];
       backendId = backendSessionId || null;
@@ -331,7 +339,14 @@
       function recoTag(text) { return '<span class="reco-tag">' + esc(text) + '</span>'; }
 
       function startFromCard(category, difficulty, btn) {
-        if (creating) return;
+        // sessionStarted is checked first and never resets - closes a real
+        // gap the transient `creating` flag alone left open: on a fast
+        // backend, the first click's whole request can finish (resetting
+        // `creating` back to false) before a fast second click arrives,
+        // which would otherwise be treated as a brand-new, legitimate
+        // "start another session" request from the (by then stale, hidden)
+        // card button.
+        if (creating || sessionStarted) return;
         btn.disabled = true;
         btn.textContent = 'Starting…';
         if (!setupRole.value) setupRole.value = setupRole.options[1].value;
@@ -462,7 +477,10 @@
       renderRecommendation();
 
       setupStart.addEventListener('click', function () {
-        if (creating) return;
+        // See startFromCard()'s comment - sessionStarted is the permanent
+        // latch that closes the gap `creating` alone leaves (it only
+        // guards one in-flight request, and resets the moment it resolves).
+        if (creating || sessionStarted) return;
         var role = setupRole.value, category = setupCategory.value,
             difficulty = setupDifficulty.value, count = parseInt(setupCount.value, 10);
         if (!role || !category) {
