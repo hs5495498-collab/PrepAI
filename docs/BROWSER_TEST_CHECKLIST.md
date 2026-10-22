@@ -1,15 +1,51 @@
 # Manual Browser Testing Checklist
 
-**Status: NOT YET PERFORMED.** Phase 11 explicitly left manual browser/DOM
-testing outstanding, and Phase 12 has not performed it either - no browser
-automation tool was used in this session, and no one has clicked through
-the live UI yet. This checklist is the concrete list of what the user still
-needs to do by hand (or via `/run` or browser automation in a future
-session) before the application can be called manually verified end-to-end.
+**Status: manual click-through still NOT performed.** No one has clicked
+through the live UI by hand in any phase, including this one - the items
+below remain unchecked for that reason. A Phase 0/1 automated-verification
+pass did, however, add real Selenium browser coverage (`tests/selenium/`,
+27 tests, headless Chrome, run via
+`backend\.venv\Scripts\python.exe -m pytest tests\selenium -v`) for several
+of the workflows this checklist describes. See "Automated coverage" just
+below for exactly which items that satisfies - automated coverage is a
+different, narrower kind of evidence than a human manually clicking through
+the real browser UI, and the two are never merged into one claim here.
 
 Every item includes the expected result. Check items off as you complete
-them. Run the backend (`uvicorn main:app --reload`) and frontend (Live
-Server on `127.0.0.1:5500`) first - see `LOCAL_SETUP_AND_DEMO.md`.
+them by hand. Run the backend (`uvicorn main:app --reload`) and frontend
+(Live Server on `127.0.0.1:5500`) first - see `LOCAL_SETUP_AND_DEMO.md`.
+
+## Automated coverage (Selenium, Phase 0/1 of this audit cycle)
+
+These specific behaviors are exercised by an automated, headless browser
+test and pass reproducibly (confirmed by running the suite 4 times in a
+row with 0 failures) - this is **automated-test verification, not manual
+verification**, and the checkboxes below are intentionally left unchecked:
+
+| Checklist item | Automated by |
+|---|---|
+| Register, duplicate email rejected, malformed email rejected, wrong password rejected, login, logout, session persists on refresh | `TestAccountAndInterviewFlow::test_04`-`test_10` |
+| Topbar shows "Log In" / signed-in email on every `js/api.js` page | `test_03b`, `test_10b`, `test_dashboard_offers_a_clear_login_link_when_logged_out` |
+| Backend-connected indicator | `test_03_backend_status_indicator_shows_connected` |
+| Start interview, distinct question per step, live question counter | `test_11_start_interview`, `test_12_answer_and_navigate_all_questions` |
+| 15-question interview has 15 distinct questions (fixed bank and offline-demo mirror) | `test_fifteen_question_interview_has_no_duplicate_questions`, `test_offline_demo_fifteen_questions_has_no_duplicates` |
+| Blank-answer rejected with a visible hint | `test_blank_answer_rejected_during_interview` |
+| Going back preserves a typed/submitted answer, and the answer box locks (matches the backend's duplicate-answer `409`) | `test_previous_question_answer_is_preserved_and_locked_after_submit` (new) |
+| Interview completion reaches `results.html`, demo score shown and labeled "(demo)" | `test_13_interview_completion_shows_results`, offline-mode tests |
+| Typed HTML in an answer renders as literal text, never executes/renders as markup | `test_13_interview_completion_shows_results` |
+| Account history shows a new entry; local-browser-history section stays present and separate | `test_14_history_shows_new_account_entry`, `test_history_logged_out_shows_local_section_only` |
+| Analytics and recommendations sections render (non-empty) for a logged-in account | `test_15_analytics_and_recommendations_render` |
+| Offline demo mode completes a full interview with the backend stopped | `test_offline_demo_mode_completes_without_backend` |
+| **Cross-account isolation**: account B cannot open account A's interview via its own history-page link (gets the same "not found" notice), and account B's own history never mentions account A's interview | `TestCrossAccountIsolation` (new, two real registered accounts, real cookies, a real `session_id` taken from the UI's own link - not a hand-built URL) |
+
+**Still only possible by hand, or explicitly out of scope for automation**
+(unchanged by this phase): the AI-evaluation enabled/disabled/failure cases
+(would require a real `OPENAI_API_KEY` and real cost - never run by an
+automated suite per this project's rules), oversized-answer (10,001+ char)
+rejection via the UI (covered at the API level only, in
+`backend/tests/test_api.py`), mid-interview refresh behavior, backend-restart
+persistence via the UI (covered at the storage layer only, in
+`backend/tests/test_storage.py`), and literally watching the Network tab.
 
 ## Registration, login, logout
 

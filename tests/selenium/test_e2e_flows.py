@@ -226,11 +226,47 @@ class TestLoggedOutStates:
         Select(driver.find_element(By.ID, "setupCount")).select_by_value("5")
         driver.find_element(By.ID, "setupStart").click()
         wait.until(EC.visibility_of_element_located((By.ID, "session")))
+        # Wait for the question content itself to be drawn, not just the
+        # container becoming visible - matches the same pattern already
+        # used by test_11_start_interview and the 15-question tests below.
+        # Without this, reading #qcount immediately after the container
+        # becomes visible is occasionally flaky (observed ~1/3 runs).
+        wait.until(lambda d: "Question 1 of 5" in d.find_element(By.ID, "qcount").text)
         driver.find_element(By.ID, "answer").clear()
         driver.find_element(By.ID, "submit").click()
         hint = wait.until(lambda d: d.find_element(By.ID, "hint").text)
         assert hint.strip() != ""
         assert "Question 1 of 5" in driver.find_element(By.ID, "qcount").text
+
+    def test_previous_question_answer_is_preserved_and_locked_after_submit(self, driver, wait, frontend_url):
+        # Covers "navigate between questions without losing answers" and
+        # "prevent unintended duplicate answer submission": going back to
+        # an already-submitted question must show the same answer text,
+        # with the answer box locked (matching the backend's 409 on a
+        # duplicate answer - see backend/main.py's AlreadyCompleted/
+        # DuplicateAnswer handling).
+        goto(driver, frontend_url, "practice.html")
+        wait.until(EC.visibility_of_element_located((By.ID, "setup")))
+        Select(driver.find_element(By.ID, "setupRole")).select_by_visible_text("QA Engineer")
+        Select(driver.find_element(By.ID, "setupCategory")).select_by_value("behavioral")
+        Select(driver.find_element(By.ID, "setupDifficulty")).select_by_value("easy")
+        Select(driver.find_element(By.ID, "setupCount")).select_by_value("5")
+        driver.find_element(By.ID, "setupStart").click()
+        wait.until(EC.visibility_of_element_located((By.ID, "session")))
+        wait.until(lambda d: "Question 1 of 5" in d.find_element(By.ID, "qcount").text)
+
+        answer_text = "My answer to question one."
+        driver.find_element(By.ID, "answer").send_keys(answer_text)
+        driver.find_element(By.ID, "submit").click()
+        wait.until(lambda d: "Question 2 of 5" in d.find_element(By.ID, "qcount").text)
+
+        driver.find_element(By.ID, "prev").click()
+        wait.until(lambda d: "Question 1 of 5" in d.find_element(By.ID, "qcount").text)
+        answer_box = driver.find_element(By.ID, "answer")
+        assert answer_box.get_attribute("value") == answer_text
+        assert answer_box.get_attribute("disabled") is not None
+        hint_text = driver.find_element(By.ID, "hint").text
+        assert "already" in hint_text.lower()
 
     def test_dashboard_offers_a_clear_login_link_when_logged_out(self, driver, wait, frontend_url):
         # Regression test for "login page is not showing": a logged-out
@@ -352,3 +388,84 @@ class TestOfflineDemoMode:
             wait.until(EC.url_contains("results.html"))
         finally:
             backend_server.start()
+
+
+class TestCrossAccountIsolation:
+    """Real-browser verification that one account's interview is never
+    readable by a different account. backend/tests/test_history_api.py and
+    test_auth.py already cover this at the API level with direct requests;
+    this class exercises the same guarantee through the actual UI with two
+    real accounts, real cookies, and a real session_id taken from the
+    account-history page's own link - not a hand-constructed URL."""
+
+    email_a = unique_email()
+    email_b = unique_email()
+    shared_session_url = {}
+
+    def test_account_a_creates_an_interview_and_captures_its_link(self, driver, wait, frontend_url):
+        goto(driver, frontend_url, "settings.html")
+        wait.until(EC.visibility_of_element_located((By.ID, "account-loggedout")))
+        driver.find_element(By.ID, "authEmail").clear()
+        driver.find_element(By.ID, "authEmail").send_keys(self.email_a)
+        driver.find_element(By.ID, "authPassword").clear()
+        driver.find_element(By.ID, "authPassword").send_keys(TEST_PASSWORD)
+        driver.find_element(By.ID, "authRegisterBtn").click()
+        wait.until(EC.visibility_of_element_located((By.ID, "account-loggedin")))
+
+        goto(driver, frontend_url, "practice.html")
+        wait.until(EC.visibility_of_element_located((By.ID, "setup")))
+        Select(driver.find_element(By.ID, "setupRole")).select_by_visible_text("QA Engineer")
+        Select(driver.find_element(By.ID, "setupCategory")).select_by_value("technical")
+        Select(driver.find_element(By.ID, "setupDifficulty")).select_by_value("easy")
+        Select(driver.find_element(By.ID, "setupCount")).select_by_value("5")
+        driver.find_element(By.ID, "setupStart").click()
+        wait.until(EC.visibility_of_element_located((By.ID, "session")))
+        for i in range(1, 6):
+            wait.until(lambda d, i=i: f"Question {i} of 5" in d.find_element(By.ID, "qcount").text)
+            answer_box = driver.find_element(By.ID, "answer")
+            answer_box.clear()
+            answer_box.send_keys("Account A's private answer - must never be visible to account B.")
+            driver.find_element(By.ID, "submit").click()
+            if i == 5:
+                wait.until(EC.alert_is_present())
+                driver.switch_to.alert.accept()
+        wait.until(EC.url_contains("results.html"))
+
+        goto(driver, frontend_url, "history.html")
+        row_link = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "#account-history-body a.view-link")))
+        href = row_link.get_attribute("href")
+        assert "results.html?session=" in href
+        TestCrossAccountIsolation.shared_session_url["url"] = href
+
+        goto(driver, frontend_url, "settings.html")
+        wait.until(EC.visibility_of_element_located((By.ID, "account-loggedin")))
+        driver.find_element(By.ID, "authLogoutBtn").click()
+        wait.until(EC.visibility_of_element_located((By.ID, "account-loggedout")))
+
+    def test_account_b_cannot_view_account_as_interview(self, driver, wait, frontend_url):
+        assert "url" in TestCrossAccountIsolation.shared_session_url, "account A's session link was not captured"
+
+        wait.until(EC.visibility_of_element_located((By.ID, "account-loggedout")))
+        driver.find_element(By.ID, "authEmail").clear()
+        driver.find_element(By.ID, "authEmail").send_keys(self.email_b)
+        driver.find_element(By.ID, "authPassword").clear()
+        driver.find_element(By.ID, "authPassword").send_keys(TEST_PASSWORD)
+        driver.find_element(By.ID, "authRegisterBtn").click()
+        wait.until(EC.visibility_of_element_located((By.ID, "account-loggedin")))
+
+        driver.get(TestCrossAccountIsolation.shared_session_url["url"])
+        result_box = wait.until(EC.visibility_of_element_located((By.ID, "result")))
+        wait.until(lambda d: result_box.text.strip() not in ("", "Loading your interview…"))
+        assert "could not be found" in result_box.text.lower()
+        assert "Account A's private answer" not in result_box.text
+        assert "QA Engineer" not in result_box.text
+
+        goto(driver, frontend_url, "history.html")
+        account_body = wait.until(EC.visibility_of_element_located((By.ID, "account-history-body")))
+        wait.until(lambda d: account_body.text.strip() != "")
+        assert "QA Engineer" not in account_body.text
+
+        goto(driver, frontend_url, "settings.html")
+        wait.until(EC.visibility_of_element_located((By.ID, "account-loggedin")))
+        driver.find_element(By.ID, "authLogoutBtn").click()
+        wait.until(EC.visibility_of_element_located((By.ID, "account-loggedout")))
