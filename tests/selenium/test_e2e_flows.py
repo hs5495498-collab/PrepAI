@@ -28,6 +28,25 @@ def goto(driver, frontend_url, page):
     driver.get(f"{frontend_url}/{page}")
 
 
+def register(driver, wait, frontend_url, email):
+    """Registers a brand-new account via settings.html and leaves the
+    browser logged in. Shared by the Phase 2A recommendation tests below,
+    each of which needs its own fresh account - logs out first if the
+    shared module-scoped driver is still signed in from a prior test."""
+    goto(driver, frontend_url, "settings.html")
+    wait.until(lambda d: d.find_element(By.ID, "account-loggedout").is_displayed()
+               or d.find_element(By.ID, "account-loggedin").is_displayed())
+    if driver.find_element(By.ID, "account-loggedin").is_displayed():
+        driver.find_element(By.ID, "authLogoutBtn").click()
+        wait.until(EC.visibility_of_element_located((By.ID, "account-loggedout")))
+    driver.find_element(By.ID, "authEmail").clear()
+    driver.find_element(By.ID, "authEmail").send_keys(email)
+    driver.find_element(By.ID, "authPassword").clear()
+    driver.find_element(By.ID, "authPassword").send_keys(TEST_PASSWORD)
+    driver.find_element(By.ID, "authRegisterBtn").click()
+    wait.until(EC.visibility_of_element_located((By.ID, "account-loggedin")))
+
+
 class TestAccountAndInterviewFlow:
     """One continuous story, in order, using one shared account."""
 
@@ -469,3 +488,114 @@ class TestCrossAccountIsolation:
         wait.until(EC.visibility_of_element_located((By.ID, "account-loggedin")))
         driver.find_element(By.ID, "authLogoutBtn").click()
         wait.until(EC.visibility_of_element_located((By.ID, "account-loggedout")))
+
+
+class TestPracticeRecommendation:
+    """Phase 2A: the 'Recommended for You' card on practice.html. Reuses
+    the existing GET /api/recommendations (Phase 9, see
+    backend/tests/test_recommendations.py and test_recommendations_api.py
+    for the underlying rule-engine/ownership coverage - not duplicated
+    here) and the existing interview-creation flow - no new endpoint, no
+    AI calls, fixed-question bank only (AI is stripped for this suite)."""
+
+    def test_logged_out_shows_generic_baseline_and_can_start_a_real_interview(self, driver, wait, frontend_url):
+        goto(driver, frontend_url, "practice.html")
+        wait.until(EC.visibility_of_element_located((By.ID, "setup")))
+        reco = wait.until(EC.visibility_of_element_located((By.ID, "recommendation")))
+        wait.until(lambda d: "Loading" not in reco.text)
+        assert "Sign in" in reco.text
+        assert "Start Recommended Session" in reco.text
+
+        driver.find_element(By.ID, "recoStartBtn").click()
+        wait.until(EC.visibility_of_element_located((By.ID, "session")))
+        wait.until(lambda d: "Question 1 of 5" in d.find_element(By.ID, "qcount").text)
+        assert "fixed question bank" in driver.find_element(By.ID, "sessionMode").text
+
+    def test_logged_in_zero_history_shows_real_backend_text_and_updates_after_a_completed_interview(self, driver, wait, frontend_url):
+        register(driver, wait, frontend_url, unique_email())
+
+        goto(driver, frontend_url, "practice.html")
+        wait.until(EC.visibility_of_element_located((By.ID, "setup")))
+        reco = wait.until(EC.visibility_of_element_located((By.ID, "recommendation")))
+        wait.until(lambda d: "Loading" not in reco.text)
+        # This exact wording comes straight from recommendations.py's
+        # _no_history_recommendation() - not frontend-invented copy.
+        assert "Complete your first practice interview" in reco.text
+        assert "don" in reco.text and "have any yet" in reco.text
+
+        driver.find_element(By.ID, "recoStartBtn").click()
+        wait.until(EC.visibility_of_element_located((By.ID, "session")))
+        for i in range(1, 6):
+            wait.until(lambda d, i=i: f"Question {i} of 5" in d.find_element(By.ID, "qcount").text)
+            answer_box = driver.find_element(By.ID, "answer")
+            answer_box.clear()
+            answer_box.send_keys(f"Answer {i}.")
+            driver.find_element(By.ID, "submit").click()
+            if i == 5:
+                wait.until(EC.alert_is_present())
+                driver.switch_to.alert.accept()
+        wait.until(EC.url_contains("results.html"))
+
+        # Real account history changed (one completed interview, still zero
+        # evaluations since AI is disabled for this suite) - the card must
+        # reflect that honestly with the backend's own distinct wording,
+        # never still claiming "no history" and never inventing a score.
+        goto(driver, frontend_url, "practice.html")
+        wait.until(EC.visibility_of_element_located((By.ID, "setup")))
+        reco2 = wait.until(EC.visibility_of_element_located((By.ID, "recommendation")))
+        wait.until(lambda d: "Loading" not in reco2.text)
+        assert "Get AI feedback on a past answer" in reco2.text
+        assert "Complete your first practice interview" not in reco2.text
+
+    def test_start_recommended_session_rapid_double_click_creates_only_one_interview(self, driver, wait, frontend_url):
+        register(driver, wait, frontend_url, unique_email())
+
+        goto(driver, frontend_url, "practice.html")
+        wait.until(EC.visibility_of_element_located((By.ID, "setup")))
+        reco = wait.until(EC.visibility_of_element_located((By.ID, "recommendation")))
+        wait.until(lambda d: "Loading" not in reco.text)
+
+        btn = driver.find_element(By.ID, "recoStartBtn")
+        btn.click()
+        try:
+            driver.find_element(By.ID, "recoStartBtn").click()
+        except Exception:
+            pass  # already disabled/removed by the first click - acceptable
+        wait.until(EC.visibility_of_element_located((By.ID, "session")))
+        wait.until(lambda d: "of 5" in d.find_element(By.ID, "qcount").text)
+
+        goto(driver, frontend_url, "history.html")
+        account_body = wait.until(EC.visibility_of_element_located((By.ID, "account-history-body")))
+        wait.until(lambda d: account_body.text.strip() != "")
+        # tbody rows only - #account-history-body also contains the table's
+        # own <thead> row, which isn't an interview.
+        rows = driver.find_elements(By.CSS_SELECTOR, "#account-history-body tbody tr")
+        assert len(rows) == 1, f"a rapid double-click on Start Recommended Session created {len(rows)} interviews, expected 1"
+
+    def test_recommendation_card_shows_error_and_retry_when_backend_unavailable(self, driver, wait, frontend_url, backend_server):
+        backend_server.stop()
+        try:
+            goto(driver, frontend_url, "practice.html")
+            wait.until(EC.visibility_of_element_located((By.ID, "setup")))
+            reco = wait.until(EC.visibility_of_element_located((By.ID, "recommendation")))
+            wait.until(lambda d: "Loading" not in reco.text)
+            assert "Could not load your personalized recommendation" in reco.text
+            assert "Try again" in reco.text
+        finally:
+            backend_server.start()
+
+    def test_recommendation_card_renders_and_starts_a_session_at_mobile_width(self, driver, wait, frontend_url):
+        driver.set_window_size(390, 844)
+        try:
+            goto(driver, frontend_url, "practice.html")
+            wait.until(EC.visibility_of_element_located((By.ID, "setup")))
+            reco = wait.until(EC.visibility_of_element_located((By.ID, "recommendation")))
+            wait.until(lambda d: "Loading" not in reco.text)
+            btn = driver.find_element(By.ID, "recoStartBtn")
+            assert btn.is_displayed()
+            assert btn.size["width"] > 300  # full-width per the <=720px CSS rule
+            btn.click()
+            wait.until(EC.visibility_of_element_located((By.ID, "session")))
+            wait.until(lambda d: "Question 1 of 5" in d.find_element(By.ID, "qcount").text)
+        finally:
+            driver.set_window_size(1366, 900)

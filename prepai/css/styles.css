@@ -102,8 +102,13 @@ svg.icon { stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: 
 .metric-sub { font-size: .8125rem; color: var(--muted); margin-top: 2px; }
 .split { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 40px; align-items: start; }
 .split .section-title { margin-bottom: 12px; }
-.reco { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; display: flex; flex-direction: column; gap: 14px; }
+.reco { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; display: flex; flex-direction: column; gap: 4px; }
 .reco-text { font-size: 1.0625rem; font-weight: 500; line-height: 1.45; }
+.reco-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.reco-tag { display: inline-flex; align-items: center; background: var(--primary-soft); color: var(--primary); font-size: .8125rem; font-weight: 500; padding: 4px 10px; border-radius: 999px; }
+.reco-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+.reco-secondary { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.reco-secondary-list { display: flex; gap: 8px; flex-wrap: wrap; }
 
 /* ---------- Lists ---------- */
 .list { border-top: 1px solid var(--border); }
@@ -266,6 +271,7 @@ details.qa .qa-body { padding: 0 0 20px 44px; color: var(--muted); }
   .practice { padding-top: 32px; }
   .question { font-size: 1.375rem; }
   .practice-actions .btn-primary { width: 100%; order: -1; }
+  .reco-actions .btn, .reco-secondary-list .btn { width: 100%; }
   .table thead { display: none; }
   .table, .table tbody { display: block; }
   .table tr { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; padding: 14px 0; border-bottom: 1px solid var(--border); }

@@ -69,7 +69,7 @@
     if (focusParam === 'weak') focusParam = P.weakest().key;
     var skill = focusParam ? skillByKey(focusParam) : null;
 
-    var setupEl = $('#setup'), sessionEl = $('#session');
+    var setupEl = $('#setup'), sessionEl = $('#session'), introEl = $('#practiceIntro'), recoEl = $('#recommendation');
     var root = $('.practice'), qcount = $('#qcount'), sessionMode = $('#sessionMode'), bar = $('#pbar'),
         question = $('#question'), answer = $('#answer'), hint = $('#hint'), mic = $('#mic'), wave = $('#wave'),
         timer = $('#timer'), pauseBtn = $('#pause'), prevBtn = $('#prev'), nextBtn = $('#submit'),
@@ -77,6 +77,8 @@
     var setupRole = $('#setupRole'), setupCategory = $('#setupCategory'),
         setupDifficulty = $('#setupDifficulty'), setupCount = $('#setupCount'),
         setupHint = $('#setupHint'), setupStart = $('#setupStart'), setupOfflineStart = $('#setupOfflineStart');
+    var ALL_CATEGORIES = ['technical', 'hr', 'behavioral'];
+    var BASELINE_CATEGORY = 'technical', BASELINE_DIFFICULTY = 'easy', QUESTION_COUNT_DEFAULT = 5;
 
     if (settings.showTimer === false) timer.hidden = true;
 
@@ -255,6 +257,8 @@
         if (meta && meta.bankNote) sessionMode.textContent += ' · ' + meta.bankNote;
       }
       setupEl.hidden = true;
+      if (introEl) introEl.hidden = true;
+      if (recoEl) recoEl.hidden = true;
       sessionEl.hidden = false;
       root.classList.remove('is-paused');
       pauseBtn.textContent = 'Pause';
@@ -310,6 +314,152 @@
       if (settings.questionCount === '5') setupCount.value = '5';
       var roleOptions = Array.prototype.map.call(setupRole.options, function (o) { return o.value; });
       if (settings.role && roleOptions.indexOf(settings.role) > -1) setupRole.value = settings.role;
+
+      /* ---- Recommended-for-You card (Phase 2A) ----
+         Consumes the existing GET /api/recommendations (Phase 9) - no new
+         endpoint or response shape invented here. Falls back to a clearly
+         labeled, non-personalized starting point when logged out, when
+         there's no history yet, or when the request fails - this never
+         fabricates a score, a weakness, or a trend that isn't in the real
+         data returned by the backend. */
+      function minutesEstimate(count) {
+        // A simple, generic pacing estimate (~2 min/question) shown to the
+        // user as an estimate, not a personalized metric - same spirit as
+        // demoScore()'s "(demo)" label elsewhere on this page.
+        return Math.max(5, count * 2);
+      }
+      function recoTag(text) { return '<span class="reco-tag">' + esc(text) + '</span>'; }
+
+      function startFromCard(category, difficulty, btn) {
+        if (creating) return;
+        btn.disabled = true;
+        btn.textContent = 'Starting…';
+        if (!setupRole.value) setupRole.value = setupRole.options[1].value;
+        setupCategory.value = category;
+        setupDifficulty.value = difficulty;
+        setupStart.click();
+        // Reuses setupStart's own click handler (same CSRF/ownership/error
+        // handling as the plain "Start Interview" button, no duplicated
+        // network code) - this just mirrors its disabled state back onto
+        // this separate button until that attempt finishes either way.
+        (function waitForSetupStart(tries) {
+          if (!setupStart.disabled || tries > 150) {
+            btn.disabled = false;
+            btn.textContent = btn.dataset.label;
+            return;
+          }
+          setTimeout(function () { waitForSetupStart(tries + 1); }, 100);
+        })(0);
+      }
+
+      function renderRecoCard(cfg) {
+        var category = cfg.category || BASELINE_CATEGORY;
+        var difficulty = cfg.difficulty || BASELINE_DIFFICULTY;
+        var count = cfg.count || QUESTION_COUNT_DEFAULT;
+        var mins = minutesEstimate(count);
+        var tags = recoTag((CATEGORY_LABEL[category] || cap(category))) + recoTag(cap(difficulty) + ' difficulty') +
+          recoTag(count + ' question' + (count === 1 ? '' : 's')) + recoTag('~' + mins + ' min (estimate)') +
+          recoTag('Written answers');
+
+        var explanationMarkup = cfg.explanationHtml || esc(cfg.explanation || '');
+        var reasonHtml = '';
+        if (cfg.evidenceLines && cfg.evidenceLines.length) {
+          reasonHtml = '<p class="muted" style="margin-top:8px;font-size:.8125rem">' + cfg.evidenceLines.map(esc).join(' · ') + '</p>';
+        } else if (cfg.reasonLine) {
+          reasonHtml = '<p class="muted" style="margin-top:8px;font-size:.8125rem;font-style:italic">' + esc(cfg.reasonLine) + '</p>';
+        }
+        var actionHtml = cfg.actionLine ? '<p style="margin-top:8px">Next: ' + esc(cfg.actionLine) + '</p>' : '';
+        var kindLine = cfg.isGeneric
+          ? '<p class="muted" style="margin-top:4px">General starting point — not yet personalized to your history.</p>'
+          : '<p class="muted" style="margin-top:4px">A rule-based suggestion from your own evaluated practice history — not a trained AI model.</p>';
+
+        var others = ALL_CATEGORIES.filter(function (c) { return c !== category; });
+        var secondaryHtml = others.map(function (c) {
+          var label = 'Try ' + (CATEGORY_LABEL[c] || cap(c)) + ' instead';
+          return '<button class="btn btn-outline btn-sm reco-secondary-btn" type="button" data-category="' + c +
+            '" data-difficulty="' + difficulty + '" data-label="' + esc(label) + '">' + esc(label) + '</button>';
+        }).join('');
+
+        recoEl.innerHTML =
+          '<div class="eyebrow">Recommended for You</div>' +
+          '<h3 class="reco-text" style="margin-top:6px">' + esc(cfg.title) + '</h3>' +
+          '<p class="muted">' + explanationMarkup + '</p>' +
+          reasonHtml + actionHtml + kindLine +
+          '<div class="reco-tags">' + tags + '</div>' +
+          '<div class="reco-actions"><button class="btn btn-primary" type="button" id="recoStartBtn" data-label="Start Recommended Session">Start Recommended Session</button></div>' +
+          (others.length ? '<div class="reco-secondary"><span class="muted" style="font-size:.8125rem">Or choose a different interview type:</span>' +
+            '<div class="reco-secondary-list">' + secondaryHtml + '</div></div>' : '') +
+          '<p class="muted" style="font-size:.8125rem">You can still change the role, category, difficulty, or question count below before starting.</p>';
+
+        var startBtn = $('#recoStartBtn', recoEl);
+        startBtn.addEventListener('click', function () { startFromCard(category, difficulty, startBtn); });
+        $$('.reco-secondary-btn', recoEl).forEach(function (b) {
+          b.addEventListener('click', function () { startFromCard(b.dataset.category, b.dataset.difficulty, b); });
+        });
+      }
+
+      function showBaseline(explanationHtml) {
+        renderRecoCard({
+          title: 'Start with a Technical practice interview',
+          explanationHtml: explanationHtml || 'This is a general starting point to help you begin practicing right away.',
+          isGeneric: true,
+          category: BASELINE_CATEGORY,
+          difficulty: BASELINE_DIFFICULTY,
+          count: QUESTION_COUNT_DEFAULT
+        });
+      }
+
+      function showRecoError(res) {
+        recoEl.innerHTML = '<div class="eyebrow">Recommended for You</div>' +
+          '<div class="notice" style="margin-top:8px">Could not load your personalized recommendation' +
+          (res.status === 0 ? ' — make sure the backend is running.' : '.') +
+          ' <button class="btn btn-secondary btn-sm" type="button" id="recoCardRetry" style="margin-left:8px">Try again</button></div>';
+        var retry = $('#recoCardRetry');
+        if (retry) retry.addEventListener('click', renderRecommendation);
+      }
+
+      function showFromRecommendations(data) {
+        var recs = data.recommendations || [];
+        if (!recs.length) {
+          renderRecoCard({
+            title: 'Your results look solid across the board',
+            explanation: 'No specific recommendation right now — your evaluated results look solid across the board. Keep practising to build more history.',
+            isGeneric: true,
+            category: BASELINE_CATEGORY,
+            difficulty: BASELINE_DIFFICULTY,
+            count: QUESTION_COUNT_DEFAULT
+          });
+          return;
+        }
+        var top = recs[0];
+        renderRecoCard({
+          title: top.title,
+          explanation: top.explanation,
+          reasonLine: top.reason,
+          actionLine: top.action,
+          evidenceLines: top.evidence_level === 'generic' ? [] : (top.evidence || []),
+          isGeneric: top.evidence_level === 'generic',
+          category: top.category,
+          difficulty: top.difficulty,
+          count: QUESTION_COUNT_DEFAULT
+        });
+      }
+
+      function renderRecommendation() {
+        if (!recoEl) return;
+        recoEl.innerHTML = '<div class="eyebrow">Recommended for You</div><p class="muted" style="margin-top:8px">Loading your personalized recommendation…</p>';
+        if (!window.PREP_API) { showBaseline(); return; }
+        window.PREP_API.getRecommendations().then(function (res) {
+          if (res.status === 401) {
+            showBaseline('<a class="link" href="settings.html#account-section">Sign in</a> to get a recommendation based on your own practice history. Until then, here’s a sensible starting point.');
+            return;
+          }
+          if (!res.ok || !res.data) { showRecoError(res); return; }
+          showFromRecommendations(res.data);
+        });
+      }
+
+      renderRecommendation();
 
       setupStart.addEventListener('click', function () {
         if (creating) return;
