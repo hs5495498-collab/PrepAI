@@ -103,6 +103,7 @@ svg.icon { stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: 
 .split { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 40px; align-items: start; }
 .split .section-title { margin-bottom: 12px; }
 .reco { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; display: flex; flex-direction: column; gap: 4px; }
+.reco[hidden] { display: none; }
 .reco-text { font-size: 1.0625rem; font-weight: 500; line-height: 1.45; }
 .reco-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .reco-tag { display: inline-flex; align-items: center; background: var(--primary-soft); color: var(--primary); font-size: .8125rem; font-weight: 500; padding: 4px 10px; border-radius: 999px; }
@@ -216,6 +217,7 @@ details.qa .qa-body { padding: 0 0 20px 44px; color: var(--muted); }
 @keyframes wave { 0%, 100% { height: 5px; } 50% { height: 22px; } }
 .hint { color: var(--danger); font-size: .8125rem; min-height: 1.2em; }
 .practice-panel { display: flex; flex-direction: column; gap: 28px; }
+.practice-panel[hidden] { display: none; }
 .practice-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 .practice-actions > div { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }

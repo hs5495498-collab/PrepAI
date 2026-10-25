@@ -11,6 +11,7 @@ AI question generation / AI answer evaluation are never enabled here (see
 conftest.py's backend_server fixture, which strips those env vars) - this
 suite must never be able to trigger a paid OpenAI call.
 """
+import time
 import uuid
 
 from selenium.webdriver.common.by import By
@@ -330,6 +331,52 @@ class TestLoggedOutStates:
         assert len(set(seen_questions)) == 15, "a 15-question interview repeated at least one question"
         wait.until(EC.url_contains("results.html"))
 
+    def test_question_stays_visible_several_seconds_after_starting_and_after_each_answer(self, driver, wait, frontend_url):
+        # Regression test for a reported "question appears and then
+        # disappears" bug. Root-caused to a local-dev-environment issue, not
+        # application code (see docs/BROWSER_TEST_CHECKLIST.md and the
+        # session report): some static-file dev servers (e.g. a live-reload
+        # tool whose serving root is mistakenly the whole repo instead of
+        # just prepai/) watch backend/data/prepai.db for changes and push a
+        # full-page reload every time the backend writes to it - which is
+        # every single interview-related API call. This suite's own static
+        # server (see conftest.py) is correctly scoped to serve only
+        # `prepai/` with no live-reload, so it cannot reproduce that
+        # external failure mode - this test instead locks in that the
+        # *application* keeps the question visible and the session state
+        # intact well after each database-writing request, which is the
+        # guarantee the application itself is actually responsible for.
+        goto(driver, frontend_url, "practice.html")
+        wait.until(EC.visibility_of_element_located((By.ID, "setup")))
+        Select(driver.find_element(By.ID, "setupRole")).select_by_visible_text("Software Engineer")
+        Select(driver.find_element(By.ID, "setupCategory")).select_by_value("technical")
+        Select(driver.find_element(By.ID, "setupDifficulty")).select_by_value("easy")
+        Select(driver.find_element(By.ID, "setupCount")).select_by_value("5")
+        driver.find_element(By.ID, "setupStart").click()
+        wait.until(EC.visibility_of_element_located((By.ID, "session")))
+        wait.until(lambda d: "Question 1 of 5" in d.find_element(By.ID, "qcount").text)
+
+        for i in range(1, 6):
+            wait.until(lambda d, i=i: f"Question {i} of 5" in d.find_element(By.ID, "qcount").text)
+            question_text_before = driver.find_element(By.ID, "question").text
+            assert question_text_before.strip() != ""
+            # The actual bug report: wait several real seconds (well past
+            # any single request/response round trip) and confirm the
+            # question and session are still there, unchanged, not reset
+            # back to the setup screen.
+            time.sleep(3)
+            assert driver.find_element(By.ID, "session").is_displayed()
+            assert not driver.find_element(By.ID, "setup").is_displayed()
+            assert driver.find_element(By.ID, "question").text == question_text_before
+            answer_box = driver.find_element(By.ID, "answer")
+            answer_box.clear()
+            answer_box.send_keys(f"Answer that must survive a few seconds, question {i}.")
+            driver.find_element(By.ID, "submit").click()
+            if i == 5:
+                wait.until(EC.alert_is_present())
+                driver.switch_to.alert.accept()
+        wait.until(EC.url_contains("results.html"))
+
 
 class TestOfflineDemoMode:
     """Stops the Selenium suite's own backend subprocess to verify the
@@ -350,6 +397,11 @@ class TestOfflineDemoMode:
 
             offline_btn = wait.until(EC.visibility_of_element_located((By.ID, "setupOfflineStart")))
             assert offline_btn.is_displayed()
+            # The failed createInterview() request must show a real error
+            # message and keep the setup form visible - never leave a
+            # blank/stuck interview screen behind.
+            assert driver.find_element(By.ID, "setupHint").text.strip() != ""
+            assert not driver.find_element(By.ID, "session").is_displayed()
             offline_btn.click()
 
             wait.until(EC.visibility_of_element_located((By.ID, "session")))
@@ -602,6 +654,29 @@ class TestPracticeRecommendation:
         # own <thead> row, which isn't an interview.
         rows = driver.find_elements(By.CSS_SELECTOR, "#account-history-body tbody tr")
         assert len(rows) == 1, f"a rapid double-click on Start Recommended Session created {len(rows)} interviews, expected 1"
+
+    def test_question_stays_visible_after_starting_from_recommendation_card(self, driver, wait, frontend_url):
+        # Same "question disappears" regression as
+        # TestLoggedOutStates.test_question_stays_visible_several_seconds_
+        # after_starting_and_after_each_answer, but through the
+        # recommendation card's startFromCard() path (Phase 2A/2B) instead
+        # of the plain setup form, since beginSession() hides both #setup
+        # and #recommendation and that cleanup is a second place a stale
+        # reference could in principle linger.
+        goto(driver, frontend_url, "practice.html")
+        wait.until(EC.visibility_of_element_located((By.ID, "setup")))
+        reco = wait.until(EC.visibility_of_element_located((By.ID, "recommendation")))
+        wait.until(lambda d: "Loading" not in reco.text)
+        driver.find_element(By.ID, "recoStartBtn").click()
+        wait.until(EC.visibility_of_element_located((By.ID, "session")))
+        wait.until(lambda d: "Question 1 of 5" in d.find_element(By.ID, "qcount").text)
+
+        question_text_before = driver.find_element(By.ID, "question").text
+        time.sleep(3)
+        assert driver.find_element(By.ID, "session").is_displayed()
+        assert not driver.find_element(By.ID, "setup").is_displayed()
+        assert not driver.find_element(By.ID, "recommendation").is_displayed()
+        assert driver.find_element(By.ID, "question").text == question_text_before
 
     def test_recommendation_card_shows_error_and_retry_when_backend_unavailable(self, driver, wait, frontend_url, backend_server):
         backend_server.stop()
