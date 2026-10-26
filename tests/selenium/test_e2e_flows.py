@@ -360,6 +360,62 @@ class TestLoggedOutStates:
         assert metrics.is_displayed() and metrics.text.strip() != ""
         assert "Not evaluated" not in metrics.text  # the sample tiles are fixed numbers, never this wording
 
+    def test_achievements_shows_honest_sign_in_prompt_and_separate_sample_data_when_logged_out(self, driver, wait, frontend_url):
+        # Regression test for achievements.html blending sample and account
+        # milestones: a logged-out visitor's real "Your Account Achievements"
+        # section must plainly ask them to sign in, while the separate,
+        # clearly-labeled sample section still renders its own illustrative
+        # milestones (unaffected by any real account activity).
+        goto(driver, frontend_url, "achievements.html")
+        account_body = wait.until(EC.visibility_of_element_located((By.ID, "account-achievements-body")))
+        wait.until(lambda d: "Loading" not in account_body.text)
+        assert "Sign in" in account_body.text
+
+        sample_heading = driver.find_element(By.XPATH, "//h3[text()='Sample Dashboard Preview']")
+        assert sample_heading.is_displayed()
+        featured = driver.find_element(By.ID, "featured")
+        assert featured.is_displayed() and featured.text.strip() != ""
+
+    def test_achievement_milestone_thresholds_are_correct(self, driver, wait, frontend_url):
+        # Score-based achievements must require genuine evaluation data, and
+        # every threshold must match data.js's documented definitions. AI
+        # evaluation can never be exercised in this suite (no paid calls),
+        # so this verifies the real, shipped data.js threshold logic
+        # directly in a real browser's JS engine with synthetic data,
+        # instead of needing a live AI-evaluated interview to prove it.
+        goto(driver, frontend_url, "achievements.html")
+        wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "body[data-page='achievements']")))
+
+        result = driver.execute_script("""
+            var d1 = new Date('2026-01-01'), d2 = new Date('2026-01-02');
+            var byId = {};
+            window.PREP.achievements.forEach(function (a) { byId[a.id] = a; });
+            return {
+                e80_locked_at_79: byId.e80.test([{date: d1, score: 79}]),
+                e80_unlocked_at_80: !!byId.e80.test([{date: d1, score: 80}]),
+                pass_locked_empty: byId.pass.test([]),
+                first_locked_empty: byId.first.test([]),
+                first_unlocked_one: !!byId.first.test([{date: d1}]),
+                five_locked_at_four: byId.five.test([{date: d1}, {date: d1}, {date: d1}, {date: d1}]),
+                five_unlocked_at_five: !!byId.five.test([{date: d1}, {date: d1}, {date: d1}, {date: d1}, {date: d1}]),
+                plus20_empty_does_not_throw: byId.plus20.test([]),
+                plus20_locked_at_19: byId.plus20.test([{date: d1, score: 50}, {date: d2, score: 69}]),
+                plus20_unlocked_at_20: !!byId.plus20.test([{date: d1, score: 50}, {date: d2, score: 70}]),
+                e90_progress_empty_does_not_throw: byId.e90.progress([])
+            };
+        """)
+        assert result["e80_locked_at_79"] is None
+        assert result["e80_unlocked_at_80"] is True
+        assert result["pass_locked_empty"] is None
+        assert result["first_locked_empty"] is None
+        assert result["first_unlocked_one"] is True
+        assert result["five_locked_at_four"] is None
+        assert result["five_unlocked_at_five"] is True
+        assert result["plus20_empty_does_not_throw"] is None
+        assert result["plus20_locked_at_19"] is None
+        assert result["plus20_unlocked_at_20"] is True
+        assert result["e90_progress_empty_does_not_throw"] == ""
+
     def test_fifteen_question_interview_has_no_duplicate_questions(self, driver, wait, frontend_url):
         # Regression test for "interview questions repeat": a 15-question
         # interview must show 15 distinct questions, never 5 repeated 3x.
@@ -571,6 +627,17 @@ class TestCrossAccountIsolation:
         assert "results.html?session=" in href
         TestCrossAccountIsolation.shared_session_url["url"] = href
 
+        # Account A just completed its first (unevaluated) real interview -
+        # "First interview completed" (a count-based milestone) must unlock
+        # on the real account section, while no score-based milestone does.
+        goto(driver, frontend_url, "achievements.html")
+        achievements_body = wait.until(EC.visibility_of_element_located((By.ID, "account-achievements-body")))
+        wait.until(lambda d: "Loading" not in achievements_body.text)
+        assert "First interview completed" in achievements_body.text
+        assert "Scored 80 or higher" in achievements_body.text  # still listed, just locked
+        locked_rows = driver.find_elements(By.CSS_SELECTOR, "#account-achievements-body .ach-row.locked .row-title")
+        assert any(r.text == "Scored 80 or higher" for r in locked_rows)
+
         goto(driver, frontend_url, "settings.html")
         wait.until(EC.visibility_of_element_located((By.ID, "account-loggedin")))
         driver.find_element(By.ID, "authLogoutBtn").click()
@@ -598,6 +665,13 @@ class TestCrossAccountIsolation:
         account_body = wait.until(EC.visibility_of_element_located((By.ID, "account-history-body")))
         wait.until(lambda d: account_body.text.strip() != "")
         assert "QA Engineer" not in account_body.text
+
+        # Account B has zero interviews of its own - account A's "First
+        # interview completed" unlock must never leak into B's achievements.
+        goto(driver, frontend_url, "achievements.html")
+        achievements_body = wait.until(EC.visibility_of_element_located((By.ID, "account-achievements-body")))
+        wait.until(lambda d: "Loading" not in achievements_body.text)
+        assert "haven" in achievements_body.text and "any practice interviews" in achievements_body.text
 
         goto(driver, frontend_url, "settings.html")
         wait.until(EC.visibility_of_element_located((By.ID, "account-loggedin")))
@@ -832,5 +906,22 @@ class TestPracticeRecommendation:
                 )
                 assert overflow <= 1, f"horizontal overflow of {overflow}px on analytics.html at {width}x{height}"
                 assert driver.find_element(By.ID, "metrics").is_displayed()
+            finally:
+                driver.set_window_size(1366, 900)
+
+    def test_achievements_no_horizontal_overflow_at_demo_viewport_sizes(self, driver, wait, frontend_url):
+        # Same check as above, for achievements.html - this sprint added a
+        # new "Your Account Achievements" section and relabeled headings.
+        for width, height in [(1366, 768), (390, 844)]:
+            driver.set_window_size(width, height)
+            try:
+                goto(driver, frontend_url, "achievements.html")
+                account_body = wait.until(EC.visibility_of_element_located((By.ID, "account-achievements-body")))
+                wait.until(lambda d: account_body.text.strip() != "")
+                overflow = driver.execute_script(
+                    "return document.documentElement.scrollWidth - document.documentElement.clientWidth;"
+                )
+                assert overflow <= 1, f"horizontal overflow of {overflow}px on achievements.html at {width}x{height}"
+                assert driver.find_element(By.ID, "featured").is_displayed()
             finally:
                 driver.set_window_size(1366, 900)

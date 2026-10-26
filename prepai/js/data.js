@@ -187,19 +187,36 @@
 
   /* ---------- Achievements ----------
      Each achievement is only "unlocked" when its test returns a date,
-     i.e. when the condition is genuinely met by the data above. */
+     i.e. when the condition is genuinely met by the data above.
+     `kind` distinguishes what each test() actually measures, so a real
+     (non-sample) achievement computation (see pages.js's
+     renderAccountAchievements) knows which real data source to feed it:
+     'count' - only cares about c.length/c[i].date (a completed interview
+     counts toward it regardless of whether it was ever AI-evaluated);
+     'score' - reads c[i].score, so it must only ever be fed genuinely
+     evaluated records, never an unevaluated interview's placeholder. */
   P.achievements = [
     { id: 'first',  icon: 'flag',   title: 'First interview completed', desc: 'You finished your first practice interview.',
+      kind: 'count',
       test: function (c) { return c.length >= 1 ? c[0].date : null; } },
     { id: 'pass',   icon: 'check',  title: 'First passing score', desc: 'Scored 60 or higher for the first time.',
+      kind: 'score',
       test: function (c) { var x = c.filter(function (a) { return a.score >= 60; })[0]; return x ? x.date : null; } },
     { id: 'plus20', icon: 'chart',  title: 'Gained 20 points', desc: 'Raised your score by 20 points from your first attempt.',
-      test: function (c) { var x = c.filter(function (a) { return a.score - c[0].score >= 20; })[0]; return x ? x.date : null; } },
+      kind: 'score',
+      test: function (c) {
+        if (!c.length) return null;
+        var x = c.filter(function (a) { return a.score - c[0].score >= 20; })[0];
+        return x ? x.date : null;
+      } },
     { id: 'five',   icon: 'star',   title: 'Five interviews completed', desc: 'Completed five scored interviews.',
+      kind: 'count',
       test: function (c) { return c.length >= 5 ? c[4].date : null; } },
     { id: 'e80',    icon: 'trophy', title: 'Scored 80 or higher', desc: 'Reached a score of 80 or more.',
+      kind: 'score',
       test: function (c) { var x = c.filter(function (a) { return a.score >= 80; })[0]; return x ? x.date : null; } },
     { id: 'streak', icon: 'zap',    title: 'Three improvements in a row', desc: 'Each of three consecutive attempts beat the one before.',
+      kind: 'score',
       test: function (c) {
         for (var i = 3; i < c.length; i++) {
           if (c[i].score > c[i - 1].score && c[i - 1].score > c[i - 2].score && c[i - 2].score > c[i - 3].score) return c[i].date;
@@ -207,14 +224,20 @@
         return null;
       } },
     { id: 'ten',    icon: 'award',  title: 'Ten interviews completed', desc: 'Complete ten scored interviews.',
+      kind: 'count',
       test: function (c) { return c.length >= 10 ? c[9].date : null; },
       progress: function (c) { return c.length + ' of 10 completed'; } },
     { id: 'e90',    icon: 'trophy', title: 'Scored 90 or higher', desc: 'Reach a score of 90 or more.',
+      kind: 'score',
       test: function (c) { var x = c.filter(function (a) { return a.score >= 90; })[0]; return x ? x.date : null; },
-      progress: function (c) { return 'Best so far: ' + Math.max.apply(null, c.map(function (a) { return a.score; })); } }
+      progress: function (c) { return c.length ? 'Best so far: ' + Math.max.apply(null, c.map(function (a) { return a.score; })) : ''; } }
   ];
-  P.achievementState = function () {
-    var c = P.completed();
+  /* list defaults to P.completed() (the full sample+live mix, as the
+     sample dashboard preview has always used) - pass an explicit list to
+     score a different data source, e.g. a sample-only or real-account-only
+     one. See pages.js's renderAccountAchievements() for the real-data case. */
+  P.achievementState = function (list) {
+    var c = list || P.completed();
     return P.achievements.map(function (a) {
       return { id: a.id, icon: a.icon, title: a.title, desc: a.desc, date: a.test(c), progress: a.progress ? a.progress(c) : '' };
     });

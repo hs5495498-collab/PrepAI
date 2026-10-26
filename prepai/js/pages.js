@@ -721,7 +721,9 @@
     // "Improvement" as if comparable to this fixed, fictional data. See
     // renderAccountAnalytics() below for the real, account-based summary.
     var all = P.completed().filter(function (a) { return !P.isLiveAttempt(a); });
-    var unlocked = P.achievementState().filter(function (a) { return a.date; });
+    // Same sample-only scoping as `all` above - a live attempt's achievement
+    // must never appear as a marker on this sample-data performance chart.
+    var unlocked = P.achievementState(all).filter(function (a) { return a.date; });
     var missed = P.attempts.filter(function (a) { return a.status === 'missed'; });
     var range = 'all';
 
@@ -903,8 +905,19 @@
   }
 
   /* ---------------- 5. Achievements ---------------- */
+  function achievementRow(a, isLocked) {
+    return '<div class="ach-row' + (isLocked ? ' locked' : '') + '">' + icon(isLocked ? 'lock' : a.icon, 20) +
+      '<div><div class="row-title">' + a.title + '</div><div class="row-sub">' + a.desc + '</div></div>' +
+      '<span class="ach-date">' + (isLocked ? (a.progress || 'Locked') : P.fmt(a.date, true)) + '</span></div>';
+  }
   pages.achievements = function () {
-    var state = P.achievementState();
+    // #featured/#unlocked/#locked below are the curated sample dataset ONLY
+    // (P.isLiveAttempt() filters out any real attempt the candidate has
+    // actually completed) - same reasoning as the Dashboard/Analytics fixes:
+    // a live attempt must never be able to unlock a "sample" achievement, and
+    // vice versa. See renderAccountAchievements() below for the real data.
+    var sampleOnly = P.completed().filter(function (a) { return !P.isLiveAttempt(a); });
+    var state = P.achievementState(sampleOnly);
     var unlocked = state.filter(function (a) { return a.date; });
     var locked = state.filter(function (a) { return !a.date; });
     var featured = unlocked.slice().sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; }).slice(0, 3);
@@ -915,14 +928,75 @@
       return '<div class="feat">' + icon(a.icon, 22) + '<div class="row-title">' + a.title + '</div>' +
         '<div class="row-sub">' + a.desc + '</div><div class="row-sub">' + P.fmt(a.date, true) + '</div></div>';
     }).join('');
-    function row(a, isLocked) {
-      return '<div class="ach-row' + (isLocked ? ' locked' : '') + '">' + icon(isLocked ? 'lock' : a.icon, 20) +
-        '<div><div class="row-title">' + a.title + '</div><div class="row-sub">' + a.desc + '</div></div>' +
-        '<span class="ach-date">' + (isLocked ? (a.progress || 'Locked') : P.fmt(a.date, true)) + '</span></div>';
-    }
-    $('#unlocked').innerHTML = rest.map(function (a) { return row(a, false); }).join('');
-    $('#locked').innerHTML = locked.map(function (a) { return row(a, true); }).join('');
+    $('#unlocked').innerHTML = rest.map(function (a) { return achievementRow(a, false); }).join('');
+    $('#locked').innerHTML = locked.map(function (a) { return achievementRow(a, true); }).join('');
+
+    renderAccountAchievements();
   };
+
+  /* Real account achievements - derived from this account's own genuine
+     persisted activity via the existing GET /api/interviews and
+     GET /api/analytics endpoints (no new backend API). Each achievement's
+     `kind` (data.js) decides which real data source feeds its test(): a
+     'count' achievement (completion milestones) uses every real completed
+     interview regardless of evaluation status; a 'score' achievement uses
+     ONLY genuinely AI-evaluated answers (GET /api/analytics's chronological
+     `progress` list) - an unevaluated completed interview can unlock
+     "Five interviews completed" but never "Scored 80 or higher". */
+  function renderAccountAchievements() {
+    var body = $('#account-achievements-body');
+    if (!body) return;
+    body.innerHTML = '<p class="muted">Loading your achievements…</p>';
+    Promise.all([window.PREP_API.getAnalytics(), window.PREP_API.listInterviews(100, 0)]).then(function (results) {
+      var analyticsRes = results[0], listRes = results[1];
+      if (analyticsRes.status === 401 || listRes.status === 401) {
+        body.innerHTML = '<div class="notice">Sign in on the <a class="link" href="settings.html">Settings</a> page to see achievements earned on your own account.</div>';
+        return;
+      }
+      if (!analyticsRes.ok || !analyticsRes.data || !listRes.ok || !listRes.data) {
+        body.innerHTML = '<div class="notice">Could not load your achievements' +
+          ((analyticsRes.status === 0 || listRes.status === 0) ? ' — make sure the backend is running.' : '.') +
+          ' <button class="btn btn-secondary btn-sm" type="button" id="achievementsRetry" style="margin-left:8px">Try again</button></div>';
+        var retry = $('#achievementsRetry');
+        if (retry) retry.addEventListener('click', renderAccountAchievements);
+        return;
+      }
+      var analytics = analyticsRes.data, interviews = listRes.data.interviews;
+
+      var countList = interviews.filter(function (iv) { return iv.status === 'completed'; })
+        .map(function (iv) { return { date: new Date(iv.completed_at || iv.created_at) }; })
+        .sort(function (a, b) { return a.date - b.date; });
+      var scoreList = analytics.progress.map(function (p) { return { date: new Date(p.evaluated_at), score: p.score }; })
+        .sort(function (a, b) { return a.date - b.date; });
+
+      if (countList.length === 0) {
+        body.innerHTML = '<p class="muted">You haven’t completed any practice interviews on your account yet. <a class="link" href="practice.html">Start one now</a>.</p>';
+        return;
+      }
+
+      var state = P.achievements.map(function (a) {
+        var c = a.kind === 'count' ? countList : scoreList;
+        return { id: a.id, icon: a.icon, title: a.title, desc: a.desc, date: a.test(c), progress: a.progress ? a.progress(c) : '' };
+      });
+      var unlocked = state.filter(function (a) { return a.date; });
+      var locked = state.filter(function (a) { return !a.date; });
+      var featured = unlocked.slice().sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; }).slice(0, 3);
+      var rest = unlocked.filter(function (a) { return featured.indexOf(a) < 0; })
+        .sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+
+      var out = '';
+      if (featured.length) {
+        out += '<div class="featured" style="margin-bottom:16px">' + featured.map(function (a) {
+          return '<div class="feat">' + icon(a.icon, 22) + '<div class="row-title">' + a.title + '</div>' +
+            '<div class="row-sub">' + a.desc + '</div><div class="row-sub">' + P.fmt(a.date, true) + '</div></div>';
+        }).join('') + '</div>';
+      }
+      out += '<div style="border-top:1px solid var(--border)">' +
+        rest.map(function (a) { return achievementRow(a, false); }).join('') +
+        locked.map(function (a) { return achievementRow(a, true); }).join('') + '</div>';
+      body.innerHTML = out;
+    });
+  }
 
   /* ---------------- 6. Improvement plan ---------------- */
   pages.plan = function () {
