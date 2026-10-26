@@ -132,6 +132,11 @@
       .sort(function (x, y) { return x.d - y.d; });
   };
   P.name = function (a) { return a.type + ' Interview'; };
+  /* True for a real attempt the candidate just completed in this prototype
+     (id starts "demo-", see P.addDemoAttempt) - as opposed to the 8 fixed
+     a1..a8 sample entries above, which exist purely to populate the
+     dashboard/history/achievements demo views with plausible-looking data. */
+  P.isLiveAttempt = function (a) { return typeof a.id === 'string' && a.id.indexOf('demo-') === 0; };
   P.result = function (a) {
     if (a.status === 'missed') return { key: 'missed', label: 'Missed' };
     if (a.status === 'incomplete') return { key: 'incomplete', label: 'Incomplete' };

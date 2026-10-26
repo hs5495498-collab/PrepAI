@@ -189,10 +189,18 @@ class TestAccountAndInterviewFlow:
                 driver.switch_to.alert.accept()
 
     def test_13_interview_completion_shows_results(self, driver, wait):
+        # This account's interview was created on the real backend (not
+        # Offline Demo Mode), so results.html must route to the honest,
+        # evaluation-aware view (renderBackendSession()) instead of ever
+        # presenting the local word-count demo score as a verdict - no
+        # evaluation was performed in this flow, so it must say so plainly
+        # rather than show a misleading Passed/Unsuccessful/score.
         wait.until(EC.url_contains("results.html"))
         result_box = wait.until(EC.visibility_of_element_located((By.ID, "result")))
         wait.until(lambda d: result_box.text.strip() != "")
-        assert "(demo)" in result_box.text
+        assert "Not evaluated yet" in result_box.text
+        assert "Unsuccessful" not in result_box.text
+        assert "Passed" not in result_box.text
 
         # Each question/answer pair lives in a collapsed <details> - expand
         # Q1 (whose answer was "<b>test</b>") to check it renders as literal
@@ -418,7 +426,12 @@ class TestOfflineDemoMode:
             wait.until(EC.url_contains("results.html"))
             result_box = wait.until(EC.visibility_of_element_located((By.ID, "result")))
             wait.until(lambda d: result_box.text.strip() != "")
-            assert "(demo)" in result_box.text
+            # A genuinely offline attempt has no backend session at all, so
+            # it can never be AI-evaluated - never a demo-score pass/fail
+            # verdict, just an honestly-labeled simulated number.
+            assert "(simulated)" in result_box.text
+            assert "Offline Demo Mode" in result_box.text
+            assert "Unsuccessful" not in result_box.text
         finally:
             backend_server.start()
 
@@ -600,10 +613,13 @@ class TestPracticeRecommendation:
         # Phase 2B: the results page reached via the recommended-session
         # path must show the actual returned result, not a blank/stuck page -
         # including the real submitted answer text once expanded (same
-        # technique as test_13_interview_completion_shows_results).
+        # technique as test_13_interview_completion_shows_results). This is
+        # a real backend session (logged in, backend reachable), so it must
+        # route to the honest evaluation-aware view, never a demo-score verdict.
         result_box = wait.until(EC.visibility_of_element_located((By.ID, "result")))
         wait.until(lambda d: result_box.text.strip() != "")
-        assert "(demo)" in result_box.text
+        assert "Not evaluated yet" in result_box.text
+        assert "Unsuccessful" not in result_box.text
         first_qa = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#result details.qa")))
         driver.execute_script("arguments[0].open = true;", first_qa)
         qa_body_text = first_qa.find_element(By.CSS_SELECTOR, ".qa-body").text

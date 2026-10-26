@@ -18,7 +18,17 @@
     if (ch < 0) return '<span class="row-change neg">' + icon('arrow-down', 14) + Math.abs(ch) + '</span>';
     return '<span class="row-change muted">0</span>';
   }
-  function resultHTML(a) { var r = P.result(a); return '<span class="res res-' + r.key + '">' + r.label + '</span>'; }
+  function resultHTML(a) {
+    // A live attempt's score is a word-count heuristic, not a real evaluation -
+    // never present it as a Passed/Unsuccessful verdict (see P.isLiveAttempt).
+    if (a.status === 'completed' && P.isLiveAttempt(a)) return '<span class="res res-incomplete">Not evaluated</span>';
+    var r = P.result(a); return '<span class="res res-' + r.key + '">' + r.label + '</span>';
+  }
+  function changeForDisplay(a) {
+    // Same reasoning as resultHTML: a word-count heuristic is not comparable
+    // across attempts, so never show a point-change trend for a live attempt.
+    return P.isLiveAttempt(a) ? null : P.changeFor(a);
+  }
   function skillByKey(k) { return P.skills.filter(function (s) { return s.key === k; })[0]; }
 
   var pages = {};
@@ -545,7 +555,7 @@
           '<td data-label="Type">' + a.type + '</td>' +
           '<td data-label="Score">' + (a.score != null ? a.score : '—') + '</td>' +
           '<td data-label="Result">' + resultHTML(a) + '</td>' +
-          '<td data-label="Change">' + changeHTML(P.changeFor(a)) + '</td>' +
+          '<td data-label="Change">' + changeHTML(changeForDisplay(a)) + '</td>' +
           '<td>' + (clickable
             ? '<a class="view-link" href="results.html?id=' + a.id + '">View' + icon('chevron', 16) + '</a>'
             : '<span class="muted">No attempt</span>') + '</td></tr>';
@@ -858,6 +868,17 @@
     var id = new URLSearchParams(location.search).get('id');
     var a = P.attempts.filter(function (x) { return x.id === id; })[0];
     if (!a) { var c = P.completed(); a = c[c.length - 1]; }
+
+    // A completed attempt that was actually submitted to the backend has a
+    // real, authoritative session on the server (with real per-question AI
+    // evaluation state) - always show that honest view instead of ever
+    // presenting the local word-count demo score as a pass/fail verdict or
+    // a meaningful trend. See renderBackendSession() below.
+    if (a.status === 'completed' && P.isLiveAttempt(a) && a.sessionId) {
+      renderBackendSession(a.sessionId);
+      return;
+    }
+
     var out = '<div><div class="eyebrow">Interview Results</div><h2 class="page-heading" style="margin-top:6px">' + P.name(a) +
       '</h2><p class="subtle">' + P.fmt(a.date, true) + '</p></div>';
 
@@ -884,20 +905,22 @@
               '<div class="qa-body">' + esc(q.fb) + '</div></details>';
           }).join('') + '</div></div>';
       } else {
-        // A Phase 3/4 demo attempt: show the real questions/answers and a clearly labeled, non-AI demo score.
-        var sourceNote = a.source === 'backend'
-          ? 'This result uses a sample/demo score — a simple word-count heuristic for this prototype phase, not an AI evaluation of your answers. Your answers were submitted to and stored by the local FastAPI backend during this session.'
-          : 'This result uses a sample/demo score — a simple word-count heuristic for this prototype phase, not an AI evaluation of your answers. This attempt was kept only in this browser; the backend was not used (or was unavailable) for this session.';
-        out += '<div class="notice">' + sourceNote + '</div>' +
-          '<div class="score-row"><div class="big-score">' + a.score + '<span>/ 100 (demo)</span></div>' +
-          '<div class="score-meta">' + resultHTML(a) + '<p>' + cmp + '</p></div></div>' +
+        // A live attempt with no backend session (Offline Demo Mode, or the
+        // backend was unreachable when it was submitted) - there is no AI
+        // evaluation path for it at all, not merely an unavailable one, so
+        // never show a pass/fail verdict or a trend comparison for it: both
+        // would misrepresent a simple word-count heuristic as a real
+        // assessment. See the sessionId branch above for attempts that DO
+        // have a real backend session.
+        out += '<div class="notice">This attempt ran in Offline Demo Mode, so it was never submitted to the backend and cannot be evaluated. The number below is a simulated, word-count-based practice score for this device only — not a real assessment of your answers.</div>' +
+          '<div class="score-row"><div class="big-score">' + a.score + '<span>/ 100 (simulated)</span></div>' +
+          '<div class="score-meta"><span class="res res-incomplete">Not evaluated</span></div></div>' +
           '<div><h3 class="section-title">Your Answers (Demo Submission)</h3><div class="qa-list">' +
           (a.qa || []).map(function (q, i) {
             var answered = !!(q.a && q.a.trim());
             return '<details class="qa"><summary><span class="muted">Q' + (i + 1) + '</span><span class="row-title">' + esc(q.q) +
               '</span><span></span><span class="chev">' + icon('chevron', 16) + '</span></summary>' +
-              '<div class="qa-body">' + (answered ? esc(q.a) : '<em>No answer submitted.</em>') +
-              evalBlock(a.sessionId, q, i, answered) + '</div></details>';
+              '<div class="qa-body">' + (answered ? esc(q.a) : '<em>No answer submitted.</em>') + '</div></details>';
           }).join('') + '</div></div>';
       }
     }
@@ -908,9 +931,15 @@
   };
 
   /* Server-persisted interview results (Phase 10), reached via
-     results.html?session=<real backend session_id> - used by the new
-     "Your Account History" list on history.html. Completely separate
-     from the ?id=<localStorage demoId> path above, which is untouched. */
+     results.html?session=<real backend session_id> - used by the "Your
+     Account History" list on history.html, and (as of this fix) also by
+     the normal "Finish Interview" flow in pages.practice() whenever the
+     just-completed attempt has a real backend session, so a live interview
+     always shows this honest, evaluation-aware view instead of the local
+     word-count demo score. The ?id=<localStorage demoId> path in
+     pages.results() above only renders its own score for the two cases
+     where no backend session exists at all: the curated sample dataset,
+     and attempts completed entirely in Offline Demo Mode. */
   function renderBackendSession(sessionId) {
     $('#result').innerHTML = '<p class="muted">Loading your interview…</p>';
     window.PREP_API.getInterview(sessionId).then(function (res) {
@@ -931,10 +960,13 @@
       var out = '<div><div class="eyebrow">Interview Results</div><h2 class="page-heading" style="margin-top:6px">' +
         cap(data.category) + ' Interview — ' + esc(data.role) + '</h2>' +
         '<p class="subtle">' + cap(data.difficulty) + ' difficulty · ' + (data.status === 'completed' ? 'Completed' : 'In progress') + '</p></div>';
-      out += '<div class="notice">Saved to your account on the server. Any score shown is an AI-generated estimate for practice, never an objective evaluation - see each question for the full breakdown.</div>';
+      out += '<div class="notice">Saved on the backend server. Any score shown is an AI-generated estimate for practice, never an objective evaluation - see each question for the full breakdown.</div>';
       if (avg != null) {
         out += '<div class="score-row"><div class="big-score">' + avg + '<span>/ 100 average</span></div>' +
           '<div class="score-meta"><p class="muted">Average across ' + evaluated.length + ' of ' + data.questions.length + ' evaluated question(s)</p></div></div>';
+      } else {
+        out += '<div class="score-row"><div class="score-meta"><span class="res res-incomplete">Not evaluated yet</span>' +
+          '<p class="muted">Use “Evaluate with AI” on a question below for a real, AI-generated score - or if that’s unavailable, it\'ll say why.</p></div></div>';
       }
       out += '<div><h3 class="section-title">Questions &amp; Answers</h3><div class="qa-list">' +
         data.questions.map(function (q, i) {
