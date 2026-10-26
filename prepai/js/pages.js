@@ -713,7 +713,14 @@
 
   /* ---------------- 4. Progress analytics ---------------- */
   pages.analytics = function () {
-    var all = P.completed();
+    // #metrics/#chart/"What Improved"/"What to Focus On Next" below are the
+    // curated sample dataset ONLY (P.isLiveAttempt() filters out any real
+    // attempt the candidate has actually completed) - same reasoning as the
+    // Dashboard's "Sample Dashboard Preview" section: a live attempt's
+    // word-count heuristic must never be blended into "Latest Score"/
+    // "Improvement" as if comparable to this fixed, fictional data. See
+    // renderAccountAnalytics() below for the real, account-based summary.
+    var all = P.completed().filter(function (a) { return !P.isLiveAttempt(a); });
     var unlocked = P.achievementState().filter(function (a) { return a.date; });
     var missed = P.attempts.filter(function (a) { return a.status === 'missed'; });
     var range = 'all';

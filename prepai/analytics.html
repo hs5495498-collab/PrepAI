@@ -24,35 +24,39 @@
     </header>
     <main class="content">
 
-      <section class="metrics" id="metrics" aria-label="Summary"></section>
+      <section class="group" id="account-analytics-section" style="border-top:0;padding-top:0">
+        <h3 class="section-title">Your Account Analytics</h3>
+        <p class="subtle" style="margin-top:4px">Real data calculated from your account's own completed interviews and AI-evaluated answers. An interview only counts toward a score once an answer has actually been evaluated.</p>
+        <div id="account-analytics-body" style="margin-top:16px"></div>
+      </section>
+
+      <section class="group">
+        <h3 class="section-title">Sample Dashboard Preview</h3>
+        <p class="subtle" style="margin-top:4px">Illustrative sample data shipped with this prototype, unrelated to your own account - shows what populated analytics look like.</p>
+        <section class="metrics" id="metrics" aria-label="Summary" style="margin-top:16px"></section>
+      </section>
 
       <section>
-        <h3 class="section-title" style="margin-bottom:12px">Interview Performance Over Time</h3>
+        <h3 class="section-title" style="margin-bottom:12px">Interview Performance Over Time (Sample Data)</h3>
         <div id="chart"></div>
         <div class="legend" aria-label="Chart key">
-          <span><svg width="22" height="10" aria-hidden="true"><line x1="0" y1="5" x2="22" y2="5" stroke="#4169E1" stroke-width="2.25"/><circle cx="11" cy="5" r="3.5" fill="#fff" stroke="#4169E1" stroke-width="2"/></svg>Completed interview score</span>
-          <span><svg width="22" height="10" aria-hidden="true"><line x1="0" y1="5" x2="22" y2="5" stroke="#98A2B3" stroke-width="1.5" stroke-dasharray="4 4"/></svg>Trend</span>
-          <span><svg width="12" height="12" aria-hidden="true"><path d="M6 0L12 6L6 12L0 6Z" fill="#16A36A"/></svg>Achievement unlocked</span>
-          <span><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="4.5" fill="#fff" stroke="#98A2B3" stroke-width="1.5"/></svg>Missed interview (no score)</span>
+          <span><svg width="22" height="10" aria-hidden="true"><line x1="0" y1="5" x2="22" y2="5" stroke="#22D3EE" stroke-width="2.25"/><circle cx="11" cy="5" r="3.5" fill="#1A2640" stroke="#22D3EE" stroke-width="2"/></svg>Completed interview score</span>
+          <span><svg width="22" height="10" aria-hidden="true"><line x1="0" y1="5" x2="22" y2="5" stroke="#B3C0D4" stroke-width="1.5" stroke-dasharray="4 4"/></svg>Trend</span>
+          <span><svg width="12" height="12" aria-hidden="true"><path d="M6 0L12 6L6 12L0 6Z" fill="#34D399"/></svg>Achievement unlocked</span>
+          <span><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="4.5" fill="#1A2640" stroke="#B3C0D4" stroke-width="1.5"/></svg>Missed interview (no score)</span>
         </div>
         <p class="summary-line" id="summary"></p>
       </section>
 
       <section class="two-col">
         <div>
-          <h3 class="section-title">What Improved?</h3>
+          <h3 class="section-title">What Improved? (Sample Data)</h3>
           <ul class="plain-list" id="improved"></ul>
         </div>
         <div>
-          <h3 class="section-title">What to Focus On Next</h3>
+          <h3 class="section-title">What to Focus On Next (Sample Data)</h3>
           <ul class="plain-list" id="focus"></ul>
         </div>
-      </section>
-
-      <section class="group" id="account-analytics-section">
-        <h3 class="section-title">Your Account Analytics</h3>
-        <p class="subtle" style="margin-top:4px">Calculated from your account's own completed interviews and AI-evaluated answers — separate from the sample data above.</p>
-        <div id="account-analytics-body" style="margin-top:16px"></div>
       </section>
 
       <section class="group" id="recommendations-section">

@@ -109,3 +109,71 @@ def test_response_includes_recognizable_fields(monkeypatch):
     assert set(body["by_dimension"].keys()) == {
         "relevance_score", "correctness_score", "completeness_score", "clarity_score"
     }
+
+
+def complete_without_evaluation(client, category="technical", **headers):
+    """A real completed interview with a real submitted answer, but
+    deliberately never evaluated - the scenario the frontend's
+    "Not evaluated" state (and this file's honesty tests below) covers."""
+    created = create_interview(client, category=category, **headers).json()
+    session_id, question_id = created["session_id"], created["questions"][0]["id"]
+    client.post(f"/api/interviews/{session_id}/answers", json={"question_id": question_id, "answer": "An answer."}, headers=headers)
+    client.post(f"/api/interviews/{session_id}/complete", headers=headers)
+    return session_id
+
+
+def test_completed_interviews_with_no_evaluations_is_never_a_zero_score(client):
+    # Regression test for analytics.html's sample/account separation fix:
+    # an account with real completed interviews but zero evaluations must
+    # report total_interviews > 0 while every score field stays None/empty,
+    # never substituting 0 for "no evaluation exists yet".
+    register(client)
+    complete_without_evaluation(client, **csrf_headers(client))
+    complete_without_evaluation(client, category="hr", **csrf_headers(client))
+    body = client.get("/api/analytics").json()
+    assert body["total_interviews"] == 2
+    assert body["completed_interviews"] == 2
+    assert body["evaluated_answers"] == 0
+    assert body["average_score"] is None
+    assert body["highest_score"] is None
+    assert body["most_recent_score"] is None
+    assert body["by_category"] == {}
+    assert body["progress"] == []
+    assert body["progress_sufficient"] is False
+
+
+def test_multiple_evaluated_interviews_average_and_progress_correctly(monkeypatch):
+    client = TestClient(app)
+    register(client)
+    complete_with_evaluation(client, monkeypatch, 40, category="technical", **csrf_headers(client))
+    complete_with_evaluation(client, monkeypatch, 60, category="technical", **csrf_headers(client))
+    complete_with_evaluation(client, monkeypatch, 80, category="hr", **csrf_headers(client))
+    body = client.get("/api/analytics").json()
+    assert body["evaluated_answers"] == 3
+    assert body["average_score"] == 60.0
+    assert body["highest_score"] == 80
+    assert body["most_recent_score"] == 80
+    # Three real evaluated answers on different occasions must be enough to
+    # show an improvement trend - never fewer than requires 2.
+    assert body["progress_sufficient"] is True
+    assert len(body["progress"]) == 3
+
+
+def test_mixture_of_evaluated_and_unevaluated_interviews_only_counts_evaluated(monkeypatch):
+    # The exact scenario this sprint's bug report describes: some
+    # interviews completed and evaluated, others completed but not -
+    # the unevaluated ones must not drag down, zero out, or otherwise
+    # distort the evaluated-only metrics.
+    client = TestClient(app)
+    register(client)
+    complete_without_evaluation(client, **csrf_headers(client))
+    complete_with_evaluation(client, monkeypatch, 90, category="technical", **csrf_headers(client))
+    complete_without_evaluation(client, category="hr", **csrf_headers(client))
+    body = client.get("/api/analytics").json()
+    assert body["total_interviews"] == 3
+    assert body["completed_interviews"] == 3
+    assert body["evaluated_answers"] == 1
+    assert body["average_score"] == 90.0  # the single evaluated answer, not diluted by the other two
+    assert body["completion_rate"] == 1.0
+    # Only one evaluated answer exists - not enough for a trend yet.
+    assert body["progress_sufficient"] is False

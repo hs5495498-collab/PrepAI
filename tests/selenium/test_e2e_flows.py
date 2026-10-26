@@ -246,6 +246,16 @@ class TestAccountAndInterviewFlow:
         reco_body = driver.find_element(By.ID, "recommendations-body")
         wait.until(lambda d: reco_body.text.strip() != "")
 
+        # This account has one completed, unevaluated interview at this
+        # point in the flow (test_11-13) - the real account section must say
+        # so honestly, never a fabricated score or Passed/Unsuccessful
+        # verdict, while the separate sample section is unaffected.
+        assert "none of your answers have been evaluated yet" in analytics_body.text
+        assert "Unsuccessful" not in analytics_body.text
+        sample_heading = driver.find_element(By.XPATH, "//h3[text()='Sample Dashboard Preview']")
+        assert sample_heading.is_displayed()
+        assert driver.find_element(By.ID, "metrics").is_displayed()
+
     def test_16_final_logout_returns_to_logged_out_state(self, driver, wait, frontend_url):
         goto(driver, frontend_url, "settings.html")
         wait.until(EC.visibility_of_element_located((By.ID, "account-loggedin")))
@@ -333,6 +343,22 @@ class TestLoggedOutStates:
         wait.until(EC.url_contains("settings.html#account-section"))
         logged_out = wait.until(EC.visibility_of_element_located((By.ID, "account-loggedout")))
         assert logged_out.is_displayed()
+
+    def test_analytics_shows_honest_sign_in_prompt_and_separate_sample_data_when_logged_out(self, driver, wait, frontend_url):
+        # Regression test for analytics.html blending sample and account
+        # data: a logged-out visitor's real "Your Account Analytics" section
+        # must plainly ask them to sign in, while the separate, clearly-
+        # labeled sample section still renders its own illustrative data.
+        goto(driver, frontend_url, "analytics.html")
+        account_body = wait.until(EC.visibility_of_element_located((By.ID, "account-analytics-body")))
+        wait.until(lambda d: "Loading" not in account_body.text)
+        assert "Sign in" in account_body.text
+
+        sample_heading = driver.find_element(By.XPATH, "//h3[text()='Sample Dashboard Preview']")
+        assert sample_heading.is_displayed()
+        metrics = driver.find_element(By.ID, "metrics")
+        assert metrics.is_displayed() and metrics.text.strip() != ""
+        assert "Not evaluated" not in metrics.text  # the sample tiles are fixed numbers, never this wording
 
     def test_fifteen_question_interview_has_no_duplicate_questions(self, driver, wait, frontend_url):
         # Regression test for "interview questions repeat": a 15-question
@@ -788,5 +814,23 @@ class TestPracticeRecommendation:
                 )
                 assert overflow <= 1, f"horizontal overflow of {overflow}px on practice.html at {width}x{height}"
                 assert driver.find_element(By.ID, "recoStartBtn").is_displayed()
+            finally:
+                driver.set_window_size(1366, 900)
+
+    def test_analytics_no_horizontal_overflow_at_demo_viewport_sizes(self, driver, wait, frontend_url):
+        # Same check as above, for analytics.html - this sprint added a new
+        # "Your Account Overview"-style metrics section and relabeled
+        # headings, both plausible sources of a new overflow regression.
+        for width, height in [(1366, 768), (390, 844)]:
+            driver.set_window_size(width, height)
+            try:
+                goto(driver, frontend_url, "analytics.html")
+                account_body = wait.until(EC.visibility_of_element_located((By.ID, "account-analytics-body")))
+                wait.until(lambda d: account_body.text.strip() != "")
+                overflow = driver.execute_script(
+                    "return document.documentElement.scrollWidth - document.documentElement.clientWidth;"
+                )
+                assert overflow <= 1, f"horizontal overflow of {overflow}px on analytics.html at {width}x{height}"
+                assert driver.find_element(By.ID, "metrics").is_displayed()
             finally:
                 driver.set_window_size(1366, 900)
