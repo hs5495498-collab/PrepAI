@@ -213,6 +213,24 @@ class TestAccountAndInterviewFlow:
         bold_elements = first_qa.find_elements(By.TAG_NAME, "b")
         assert all(el.text != "test" for el in bold_elements)
 
+    def test_13b_dashboard_shows_honest_account_overview(self, driver, wait, frontend_url):
+        # Regression test for the Dashboard blending live and sample data:
+        # the account just completed one interview in this flow (test_11-13)
+        # with no AI evaluation performed, so "Your Account Overview" must
+        # say so honestly - never a fabricated score, verdict, or trend -
+        # while the separate, clearly-labeled sample section is unaffected.
+        goto(driver, frontend_url, "index.html")
+        overview = wait.until(EC.visibility_of_element_located((By.ID, "account-overview-body")))
+        wait.until(lambda d: "Loading" not in overview.text)
+        assert "Not evaluated" in overview.text
+        assert "Needs 2+ evaluated answers" in overview.text
+        assert "Unsuccessful" not in overview.text
+
+        sample_heading = driver.find_element(By.XPATH, "//h3[text()='Sample Dashboard Preview']")
+        assert sample_heading.is_displayed()
+        metrics = driver.find_element(By.ID, "metrics")
+        assert metrics.is_displayed() and metrics.text.strip() != ""
+
     def test_14_history_shows_new_account_entry(self, driver, wait, frontend_url):
         goto(driver, frontend_url, "history.html")
         account_body = wait.until(EC.visibility_of_element_located((By.ID, "account-history-body")))
@@ -303,6 +321,12 @@ class TestLoggedOutStates:
         # section by accident.
         goto(driver, frontend_url, "index.html")
         wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "body[data-page='dashboard']")))
+        # The real "Your Account Overview" section must never show sample
+        # data or a fabricated score to a logged-out visitor - it must
+        # plainly ask them to sign in instead.
+        overview = wait.until(EC.visibility_of_element_located((By.ID, "account-overview-body")))
+        wait.until(lambda d: "Loading" not in overview.text)
+        assert "Sign in" in overview.text
         login_link = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, ".topbar-tools a")))
         wait.until(lambda d: login_link.text.strip() == "Log In")
         login_link.click()

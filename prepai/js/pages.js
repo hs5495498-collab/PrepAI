@@ -35,7 +35,15 @@
 
   /* ---------------- 1. Dashboard ---------------- */
   pages.dashboard = function () {
-    var c = P.completed(), first = c[0], last = c[c.length - 1], delta = last.score - first.score;
+    // This block (#metrics/#chart/#recent) is the curated sample dataset
+    // ONLY (P.isLiveAttempt() filters out any real attempt the candidate
+    // has actually completed) - it exists purely to show what a populated
+    // dashboard looks like, and must never blend in a live, possibly-
+    // unevaluated attempt's word-count heuristic score as if it were
+    // comparable to this fixed, fictional data. See renderAccountOverview()
+    // below for the real, account-based summary.
+    var c = P.completed().filter(function (a) { return !P.isLiveAttempt(a); });
+    var first = c[0], last = c[c.length - 1], delta = last.score - first.score;
     $('#metrics').innerHTML =
       metric('Latest Score', last.score, 'out of 100') +
       metric('Improvement Since First Attempt', signed(delta), 'points · ' + first.score + ' → ' + last.score, delta >= 0 ? 'pos' : 'neg') +
@@ -52,7 +60,62 @@
         '<span class="row-score">' + a.score + '</span>' + changeHTML(P.changeFor(a)) +
         '<span class="row-arrow">' + icon('chevron', 18) + '</span></a>';
     }).join('');
+
+    renderAccountOverview();
   };
+
+  /* Real account summary (this fix) - calculated server-side from the
+     signed-in account's own evaluated answers (same GET /api/analytics
+     already used by analytics.html's "Your Account Analytics"), entirely
+     separate from the sample dataset above. An interview only counts
+     toward "Latest Score" once a real AI evaluation exists for it - a
+     completed-but-unevaluated interview is never shown as a score of 0,
+     never labeled unsuccessful, and never affects a trend. */
+  function renderAccountOverview() {
+    var body = $('#account-overview-body');
+    if (!body) return;
+    body.innerHTML = '<p class="muted">Loading your account overview…</p>';
+    window.PREP_API.getAnalytics().then(function (res) {
+      if (res.status === 401) {
+        body.innerHTML = '<div class="notice">Sign in on the <a class="link" href="settings.html">Settings</a> page to see a summary calculated from your own account.</div>';
+        return;
+      }
+      if (!res.ok || !res.data) {
+        body.innerHTML = '<div class="notice">Could not load your account overview' +
+          (res.status === 0 ? ' — make sure the backend is running.' : '.') +
+          ' <button class="btn btn-secondary btn-sm" type="button" id="overviewRetry" style="margin-left:8px">Try again</button></div>';
+        var retry = $('#overviewRetry');
+        if (retry) retry.addEventListener('click', renderAccountOverview);
+        return;
+      }
+      var d = res.data;
+      if (d.total_interviews === 0) {
+        body.innerHTML = '<p class="muted">You haven’t started any practice interviews on your account yet. <a class="link" href="practice.html">Start one now</a>.</p>';
+        return;
+      }
+      // Improvement only when progress_sufficient (>= 2 evaluated answers,
+      // see analytics.py) - never computed from a single or missing
+      // evaluation, and never a comparison against the unrelated sample
+      // dataset above.
+      var improvementValue = '—', improvementSub = 'Needs 2+ evaluated answers', improvementCls = '';
+      if (d.progress_sufficient) {
+        var firstScore = d.progress[0].score, lastScore = d.progress[d.progress.length - 1].score;
+        var delta = lastScore - firstScore;
+        improvementValue = signed(delta);
+        improvementSub = 'points · ' + firstScore + ' → ' + lastScore;
+        improvementCls = delta >= 0 ? 'pos' : 'neg';
+      }
+      body.innerHTML = '<div class="metrics">' +
+        metric('Latest Evaluated Score', d.most_recent_score != null ? d.most_recent_score : 'Not evaluated', d.most_recent_score != null ? 'out of 100' : 'no AI-evaluated answer yet') +
+        metric('Improvement', improvementValue, improvementSub, improvementCls) +
+        metric('Completion Rate', d.completion_rate != null ? Math.round(d.completion_rate * 100) + '%' : '—',
+          d.completed_interviews + ' of ' + d.total_interviews + ' interviews completed') +
+        '</div>' +
+        (d.evaluated_answers === 0
+          ? '<p class="muted" style="margin-top:12px">You have ' + d.total_interviews + ' interview(s) on your account, but none have a real AI evaluation yet, so there is no score to show here.</p>'
+          : '');
+    });
+  }
 
   /* ---------------- 2. Practice interview ---------------- */
   var CATEGORY_LABEL = { technical: 'Technical', hr: 'HR', behavioral: 'Behavioral' };
