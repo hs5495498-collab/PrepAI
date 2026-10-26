@@ -189,6 +189,42 @@ def test_fixed_question_interview_persists_with_correct_source():
     assert storage.get_session(session["id"])["question_source"] == "fixed"
 
 
+def test_get_recent_question_texts_returns_own_recent_category_difficulty_only():
+    storage.create_session("Engineer", "technical", "medium", [("q1", "Old technical medium Q")], "fixed", user_id=1)
+    storage.create_session("Engineer", "technical", "easy", [("q1", "Different difficulty Q")], "fixed", user_id=1)
+    storage.create_session("Engineer", "behavioral", "medium", [("q1", "Different category Q")], "fixed", user_id=1)
+    recent = storage.get_recent_question_texts(1, "technical", "medium")
+    assert recent == {"Old technical medium Q"}
+
+
+def test_get_recent_question_texts_respects_the_interview_limit(monkeypatch):
+    # Force strictly increasing, unambiguous created_at timestamps instead
+    # of relying on wall-clock resolution between rapid inserts.
+    counter = {"n": 0}
+
+    def fake_now():
+        counter["n"] += 1
+        return "2026-01-01T00:00:{:02d}Z".format(counter["n"])
+
+    monkeypatch.setattr(storage, "_now", fake_now)
+    for i in range(5):
+        storage.create_session("Engineer", "technical", "medium", [("q1", "Q{}".format(i))], "fixed", user_id=1)
+    recent = storage.get_recent_question_texts(1, "technical", "medium", limit_interviews=2)
+    assert recent == {"Q3", "Q4"}  # only the 2 most recently created interviews
+
+
+def test_get_recent_question_texts_never_leaks_between_accounts():
+    storage.create_session("Engineer", "technical", "medium", [("q1", "User one's question")], "fixed", user_id=1)
+    storage.create_session("Engineer", "technical", "medium", [("q1", "User two's question")], "fixed", user_id=2)
+    assert storage.get_recent_question_texts(1, "technical", "medium") == {"User one's question"}
+    assert storage.get_recent_question_texts(2, "technical", "medium") == {"User two's question"}
+
+
+def test_get_recent_question_texts_anonymous_returns_empty_without_querying():
+    storage.create_session("Engineer", "technical", "medium", [("q1", "Anonymous question")], "fixed", user_id=None)
+    assert storage.get_recent_question_texts(None, "technical", "medium") == set()
+
+
 def test_ai_sourced_interview_persists_with_correct_source_no_live_call():
     # No AI provider is touched here - these questions are handed in
     # directly, exactly as main.py would after a (mocked, in other tests)

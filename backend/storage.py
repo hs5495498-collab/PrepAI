@@ -198,6 +198,33 @@ def get_question_for_evaluation(session_id: str, question_id: str) -> dict:
         conn.close()
 
 
+def get_recent_question_texts(user_id, category: str, difficulty: str, limit_interviews: int = 3) -> set:
+    """Returns the set of question texts used in this account's most recent
+    `limit_interviews` interviews of this exact category/difficulty, so a
+    new session can prefer to avoid repeating them (see
+    questions.pick_questions's exclude_texts). Scoped strictly to user_id,
+    so this never leaks one account's recent questions into another's, and
+    anonymous sessions (user_id is None) have no persistent identity to
+    track against, so this always returns an empty set for them rather
+    than querying anything - recent-question avoidance is an account-only
+    feature, like recommendations."""
+    if user_id is None:
+        return set()
+    conn = db.connect()
+    try:
+        rows = conn.execute(
+            "SELECT q.text AS text FROM questions q "
+            "WHERE q.interview_id IN ("
+            "  SELECT id FROM interviews WHERE user_id = ? AND category = ? AND difficulty = ? "
+            "  ORDER BY created_at DESC, id DESC LIMIT ?"
+            ")",
+            (user_id, category, difficulty, limit_interviews),
+        ).fetchall()
+        return {r["text"] for r in rows}
+    finally:
+        conn.close()
+
+
 def get_user_recommendation_data(user_id: int) -> dict:
     """Returns only this account's own data for building recommendations
     and analytics: its total interview count, how many it has completed,

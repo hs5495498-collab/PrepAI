@@ -205,7 +205,11 @@ def test_create_interview_uses_ai_when_configured(monkeypatch):
     assert ids == ["q1", "q2", "q3"]
 
 
-def test_create_interview_ai_failure_returns_clear_error_without_fallback(monkeypatch):
+def test_create_interview_ai_failure_falls_back_to_fixed_questions(monkeypatch):
+    # AI generation failing must never block the user from starting an
+    # interview at all - it falls back to the fixed bank instead, and says
+    # so honestly rather than ever presenting a fallback question as
+    # AI-generated.
     monkeypatch.setattr(main.ai_provider, "is_configured", lambda: True)
 
     def fake_fail(role, category, difficulty, count):
@@ -214,12 +218,13 @@ def test_create_interview_ai_failure_returns_clear_error_without_fallback(monkey
     monkeypatch.setattr(main.ai_provider, "generate_questions", fake_fail)
 
     res = create_interview()
-    assert res.status_code == 503
-    detail = res.json()["detail"]
-    assert "session_id" not in res.json()
+    assert res.status_code == 201
+    body = res.json()
+    assert body["question_source"] == "fixed"
+    assert len(body["questions"]) == 3
+    assert body["question_bank_note"] is not None
     # The internal exception text must never leak to the client.
-    assert "the provider is down right now" not in detail
-    assert isinstance(detail, str) and len(detail) > 0
+    assert "the provider is down right now" not in body["question_bank_note"]
 
 
 def test_answer_and_completion_work_with_ai_generated_questions(monkeypatch):

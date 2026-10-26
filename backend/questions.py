@@ -5,6 +5,7 @@ Each category has 5 distinct questions per difficulty (15 per category),
 so a request for up to 15 questions (the schema's max, see
 InterviewCreateRequest.question_count) can always be filled with that many
 *distinct* questions - see pick_questions() below."""
+import random
 
 DEMO_QUESTION_BANK = {
     "technical": [
@@ -61,15 +62,28 @@ DEMO_QUESTION_BANK = {
 }
 
 
-def pick_questions(category: str, difficulty: str, count: int):
+def pick_questions(category: str, difficulty: str, count: int, rng: random.Random = None, exclude_texts=None):
     """Returns (questions, insufficient).
 
     questions is a list of (question_id, text) tuples where every text is
     distinct - this never pads the result by cycling back through
-    questions it has already picked. Preference order is: questions
-    matching the requested difficulty first (in bank order), then the
-    remaining questions in the same category (also in bank order), up to
-    `count`.
+    questions it has already picked. The candidate pool is every question
+    matching the requested difficulty, then every other question in the
+    same category, each shuffled independently (so repeated calls with the
+    same category/difficulty vary which questions come back, instead of
+    always returning the bank in the same fixed order) - up to `count`.
+
+    rng lets a caller inject a seeded random.Random for reproducible tests;
+    it defaults to a fresh, unseeded Random() so production calls are
+    genuinely randomized per request.
+
+    exclude_texts, if given, is a set of question texts to avoid when
+    enough other suitable questions exist to still satisfy `count` -
+    typically this account's own recently-asked questions in this same
+    category/difficulty (see storage.get_recent_question_texts). When
+    honoring it would leave too few questions to fill the request, it is
+    dropped entirely for this call rather than ever serving fewer
+    questions than requested just to avoid a repeat.
 
     insufficient is True only when the category's entire bank has fewer
     than `count` distinct questions, in which case every available
@@ -77,10 +91,18 @@ def pick_questions(category: str, difficulty: str, count: int):
     repeating one to pad the list - callers should treat this as "the
     fixed question bank could not fully satisfy this request" and say so,
     not silently present a short, padded list as if it were full."""
+    r = rng if rng is not None else random.Random()
     pool = DEMO_QUESTION_BANK[category]
     matching = [text for d, text in pool if d == difficulty]
     other = [text for d, text in pool if d != difficulty]
+    r.shuffle(matching)
+    r.shuffle(other)
     ordered_unique = matching + other
-    insufficient = count > len(ordered_unique)
-    selected = ordered_unique[:count]
+
+    exclude_texts = exclude_texts or set()
+    fresh = [t for t in ordered_unique if t not in exclude_texts]
+    source = fresh if len(fresh) >= min(count, len(ordered_unique)) else ordered_unique
+
+    insufficient = count > len(source)
+    selected = source[:count]
     return [(f"q{i + 1}", text) for i, text in enumerate(selected)], insufficient

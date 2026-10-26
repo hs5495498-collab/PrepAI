@@ -182,3 +182,30 @@ def test_unknown_interview_id_returns_same_404_as_inaccessible_one(client):
     register(client)
     res = client.get("/api/interviews/totally-unknown-id")
     assert res.status_code == 404
+
+
+def test_second_interview_avoids_recently_asked_questions_when_logged_in(client):
+    # End-to-end proof that create_interview() actually wires in
+    # storage.get_recent_question_texts() (unit-tested directly in
+    # test_storage.py) - with 15 technical/medium questions in the bank and
+    # only 5 used by the first interview, 10 suitable alternatives remain,
+    # so the second interview must not repeat any of the first's.
+    register(client)
+    first = create_interview(client, category="technical", difficulty="medium", question_count=5, **csrf_headers(client)).json()
+    first_texts = {q["text"] for q in first["questions"]}
+
+    second = create_interview(client, category="technical", difficulty="medium", question_count=5, **csrf_headers(client)).json()
+    second_texts = {q["text"] for q in second["questions"]}
+
+    assert not (first_texts & second_texts), "the second interview repeated a question from the first, even though 10 other suitable questions existed"
+
+
+def test_anonymous_interviews_are_not_restricted_by_recent_question_history(client):
+    # Anonymous sessions have no persistent identity to track recent
+    # questions against (see storage.get_recent_question_texts), so this
+    # must succeed normally rather than erroring - it simply isn't subject
+    # to the exclusion feature at all.
+    first = create_interview(client, category="technical", difficulty="medium", question_count=5).json()
+    second = create_interview(client, category="technical", difficulty="medium", question_count=5).json()
+    assert len(first["questions"]) == 5
+    assert len(second["questions"]) == 5

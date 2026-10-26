@@ -180,6 +180,27 @@ def _to_interview_out(session: dict, question_bank_note: Optional[str] = None) -
     )
 
 
+def _pick_fixed_questions(payload: InterviewCreateRequest, user: Optional[dict]):
+    """The fixed-bank path shared by the no-AI-configured case and the
+    AI-generation-failed fallback below: randomized per call (never the
+    same fixed order every time), and - for a signed-in account - avoids
+    repeating that account's own recently-asked questions in this exact
+    category/difficulty when enough other suitable questions exist."""
+    exclude_texts = None
+    if user is not None:
+        exclude_texts = storage.get_recent_question_texts(user["id"], payload.category, payload.difficulty)
+    questions, insufficient = pick_questions(
+        payload.category, payload.difficulty, payload.question_count, exclude_texts=exclude_texts
+    )
+    note = None
+    if insufficient:
+        note = (
+            "Only {} distinct fixed sample question(s) are available for this category, "
+            "fewer than the {} requested - showing all of them once instead of repeating any."
+        ).format(len(questions), payload.question_count)
+    return questions, note
+
+
 @app.post("/api/interviews", response_model=InterviewOut, status_code=201)
 def create_interview(payload: InterviewCreateRequest, request: Request, user: Optional[dict] = Depends(get_current_user_optional)):
     if user is not None:
@@ -190,18 +211,21 @@ def create_interview(payload: InterviewCreateRequest, request: Request, user: Op
             questions = ai_provider.generate_questions(
                 payload.role, payload.category, payload.difficulty, payload.question_count
             )
+            question_source = "ai"
         except ai_provider.AIProviderError as exc:
-            message = AI_ERROR_MESSAGES.get(type(exc), "The AI question generator is currently unavailable.")
-            raise HTTPException(status_code=503, detail=message)
-        question_source = "ai"
+            # Never block starting an interview just because the AI
+            # generator failed - fall back to the fixed bank instead, and
+            # say so honestly rather than ever presenting a fallback
+            # question as AI-generated (question_source stays "fixed").
+            reason = AI_ERROR_MESSAGES.get(type(exc), "The AI question generator is currently unavailable.")
+            questions, fallback_note = _pick_fixed_questions(payload, user)
+            question_source = "fixed"
+            question_bank_note = reason + " Fixed sample questions were used instead."
+            if fallback_note:
+                question_bank_note += " " + fallback_note
     else:
-        questions, insufficient = pick_questions(payload.category, payload.difficulty, payload.question_count)
+        questions, question_bank_note = _pick_fixed_questions(payload, user)
         question_source = "fixed"
-        if insufficient:
-            question_bank_note = (
-                "Only {} distinct fixed sample question(s) are available for this category, "
-                "fewer than the {} requested - showing all of them once instead of repeating any."
-            ).format(len(questions), payload.question_count)
     session = storage.create_session(
         payload.role, payload.category, payload.difficulty, questions, question_source,
         user_id=(user["id"] if user is not None else None),

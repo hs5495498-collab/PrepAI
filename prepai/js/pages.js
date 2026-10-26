@@ -284,14 +284,25 @@
       startTimer();
     }
 
+    function shuffled(arr) {
+      // Fisher-Yates, copies rather than mutating the caller's array.
+      var out = arr.slice();
+      for (var i = out.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var tmp = out[i]; out[i] = out[j]; out[j] = tmp;
+      }
+      return out;
+    }
     // Mirrors backend/questions.py's pick_questions(): matching-difficulty
     // questions first, then the rest of the category, each used at most
     // once - never cycles back through questions already picked to pad
-    // the list up to `count`.
+    // the list up to `count`. Each pool is shuffled independently so
+    // repeated offline sessions vary instead of always serving the bank in
+    // the same fixed order.
     function pickOfflineQuestions(category, difficulty, count) {
       var all = P.demoQuestions[category] || [];
-      var matching = all.filter(function (q) { return q.d === difficulty; });
-      var other = all.filter(function (q) { return q.d !== difficulty; });
+      var matching = shuffled(all.filter(function (q) { return q.d === difficulty; }));
+      var other = shuffled(all.filter(function (q) { return q.d !== difficulty; }));
       var ordered = matching.concat(other);
       return { picked: ordered.slice(0, count), insufficient: count > ordered.length };
     }
