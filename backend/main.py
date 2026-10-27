@@ -75,7 +75,17 @@ def _log_ai_feature_status(label: str, flag_name: str, provider_module) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _log_ai_feature_status("AI question generation", "AI_QUESTIONS_ENABLED", ai_provider)
-    _log_ai_feature_status("AI answer evaluation", "AI_EVALUATION_ENABLED", evaluation_provider)
+    if evaluation_provider.is_mock_enabled():
+        # Deliberately not routed through _log_ai_feature_status: that
+        # helper reports the real OPENAI_MODEL, which would be misleading
+        # here - mock mode never calls OpenAI at all.
+        print(
+            "[PrepAI] AI answer evaluation: MOCK MODE (SIMULATED — NOT AI-GENERATED). "
+            "No OpenAI calls will be made; see MOCK_EVALUATION_ENABLED in backend/.env.",
+            flush=True,
+        )
+    else:
+        _log_ai_feature_status("AI answer evaluation", "AI_EVALUATION_ENABLED", evaluation_provider)
     yield
 
 

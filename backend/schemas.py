@@ -1,6 +1,8 @@
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+import evaluation_provider
 
 Category = Literal["technical", "hr", "behavioral"]
 Difficulty = Literal["easy", "medium", "hard"]
@@ -45,6 +47,21 @@ class QuestionEvaluationOut(BaseModel):
     suggestions: List[str]
     example_answer: Optional[str] = None
     created_at: str
+    # model/is_simulated/note: present so the results/history/analytics
+    # pages (which all read this nested object, not EvaluationOut below)
+    # can tell a mock evaluation apart from a real one too - see
+    # evaluation_provider.MOCK_MODEL_NAME and the validator below.
+    model: Optional[str] = None
+    is_simulated: bool = False
+    note: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _flag_simulated(self):
+        if self.model == evaluation_provider.MOCK_MODEL_NAME:
+            self.is_simulated = True
+            if self.note is None:
+                self.note = evaluation_provider.SIMULATED_NOTE
+        return self
 
 
 class QuestionOut(BaseModel):
@@ -127,7 +144,18 @@ class EvaluationOut(BaseModel):
     example_answer: Optional[str] = None
     model: str
     created_at: str
-    note: str = "AI-generated estimate for practice purposes - not an objective or official assessment."
+    is_simulated: bool = False
+    note: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _flag_simulated(self):
+        if self.model == evaluation_provider.MOCK_MODEL_NAME:
+            self.is_simulated = True
+            if self.note is None:
+                self.note = evaluation_provider.SIMULATED_NOTE
+        elif self.note is None:
+            self.note = "AI-generated estimate for practice purposes - not an objective or official assessment."
+        return self
 
 
 class RecommendationOut(BaseModel):

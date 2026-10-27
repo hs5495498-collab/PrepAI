@@ -27,6 +27,19 @@ DEFAULT_MODEL = "gpt-4o-mini"
 DEFAULT_TIMEOUT_SECONDS = 25.0
 MAX_TEXT_LENGTH = 4000
 
+# Marks a persisted evaluation row (the existing "model" column, see
+# db.py/storage.py - no schema change needed) as having come from the
+# mock provider below rather than a real OpenAI call. schemas.py checks
+# this exact string to decide whether to attach the SIMULATED label to an
+# API response, so it must never collide with a real OpenAI model name.
+MOCK_MODEL_NAME = "mock-simulated-v1"
+SIMULATED_NOTE = (
+    "SIMULATED — NOT AI-GENERATED: this is a deterministic, locally "
+    "computed demo evaluation, not a real AI assessment. No OpenAI call "
+    "was made and no cost was incurred."
+)
+PRODUCTION_ENVIRONMENT_NAMES = {"production", "prod"}
+
 # Rubric: documented scoring weights, summing to 100.
 SCORE_WEIGHTS = {
     "relevance_score": 30,
@@ -77,9 +90,44 @@ class EvaluationProviderInvalidResponse(EvaluationProviderError):
     pass
 
 
-def is_configured() -> bool:
+def _is_production_environment() -> bool:
+    """Structural safety net for is_mock_enabled(): even if
+    MOCK_EVALUATION_ENABLED=true is set by mistake in a production
+    deployment's environment, mock mode still refuses to turn on once
+    ENVIRONMENT names a real production deployment. Defaults to
+    "development" when unset, which is correct for every local setup this
+    project documents - a production deployment must set ENVIRONMENT
+    explicitly for this check to matter."""
+    env_name = os.environ.get("ENVIRONMENT", "development").strip().lower()
+    return env_name in PRODUCTION_ENVIRONMENT_NAMES
+
+
+def _real_provider_configured() -> bool:
     enabled = os.environ.get("AI_EVALUATION_ENABLED", "false").strip().lower() == "true"
     return enabled and bool(os.environ.get("OPENAI_API_KEY"))
+
+
+def is_mock_enabled() -> bool:
+    """True only when a developer has explicitly opted into mock
+    evaluation (MOCK_EVALUATION_ENABLED=true), the environment is not
+    production (see _is_production_environment above), and the real
+    provider isn't already configured - a working real setup always
+    takes priority, so mock mode can never silently stand in for a
+    genuine AI assessment that was actually available."""
+    requested = os.environ.get("MOCK_EVALUATION_ENABLED", "false").strip().lower() == "true"
+    if not requested:
+        return False
+    if _is_production_environment():
+        return False
+    if _real_provider_configured():
+        return False
+    return True
+
+
+def is_configured() -> bool:
+    if is_mock_enabled():
+        return True
+    return _real_provider_configured()
 
 
 def _build_payload(role: str, category: str, difficulty: str, question_text: str, answer_text: str) -> dict:
@@ -186,12 +234,59 @@ def _parse_and_validate(parsed: dict) -> dict:
     return result
 
 
+def _mock_dimension_scores(answer_text: str) -> dict:
+    """Deterministic (never random - see module docstring's req #8) scores
+    for each rubric dimension, derived only from the answer's own length:
+    the same answer_text always produces the exact same scores, run after
+    run, machine after machine - there is no hidden state and no call to
+    random/time/uuid anywhere in this function. A longer, more substantive
+    answer scores higher, within a safe 35%-95% band of each dimension's
+    maximum, so a demo shows believable variation without ever reaching
+    a suspicious-looking 0 or a perfect 100 for ordinary input."""
+    word_count = len(answer_text.split())
+    coverage = min(word_count / 100.0, 1.0)
+    ratio = 0.35 + (0.95 - 0.35) * coverage
+    return {name: max(0, min(maximum, round(maximum * ratio))) for name, maximum in SCORE_WEIGHTS.items()}
+
+
+def _mock_evaluate_answer(category: str, answer_text: str) -> dict:
+    """The mock provider: builds the exact same result shape
+    evaluate_answer() returns for a real OpenAI call (same keys, same
+    score ranges, server-computed total), so every downstream consumer -
+    storage, _score_summary, the results/history/analytics pages - works
+    identically regardless of which provider produced it. Every text field
+    is explicitly, repeatedly labeled simulated so it can never be mistaken
+    for genuine AI feedback (req #4/#8); model=MOCK_MODEL_NAME is the
+    persisted, API-visible marker schemas.py uses to attach that label."""
+    scores = _mock_dimension_scores(answer_text)
+    result = dict(scores)
+    result["total_score"] = sum(scores.values())
+    category_label = CATEGORY_LABELS.get(category, category)
+    result["relevance_assessment"] = SIMULATED_NOTE + " (Simulated relevance check for this " + category_label + " question.)"
+    result["correctness_assessment"] = SIMULATED_NOTE + " (Simulated correctness check - no real content analysis was performed.)"
+    result["explanation"] = (
+        SIMULATED_NOTE + " This score was derived locally from the answer's length, "
+        "so the interview workflow, results page, history, and analytics can be demonstrated "
+        "and tested without an OpenAI API key or any paid API call."
+    )
+    result["strengths"] = ["(Simulated) An answer was submitted for this question."]
+    result["weaknesses"] = ["(Simulated) This feedback is not based on real content analysis - enable genuine AI evaluation for that."]
+    result["suggestions"] = ["(Simulated) Set AI_EVALUATION_ENABLED=true and a real OPENAI_API_KEY to get genuine AI feedback."]
+    result["example_answer"] = None
+    result["model"] = MOCK_MODEL_NAME
+    return result
+
+
 def evaluate_answer(role: str, category: str, difficulty: str, question_text: str, answer_text: str, client: httpx.Client = None) -> dict:
     """Returns a dict with relevance_score, correctness_score, completeness_score,
     clarity_score, total_score (computed here, not from the model), the three
     assessment/explanation strings, strengths/weaknesses/suggestions lists, an
     optional example_answer, and model (the model name actually used).
-    Raises an EvaluationProviderError subclass on any failure."""
+    Raises an EvaluationProviderError subclass on any failure.
+
+    When is_mock_enabled() is true, this returns a deterministic simulated
+    result (see _mock_evaluate_answer) and makes no network call at all -
+    every other validation/shape guarantee below still applies."""
     if not is_configured():
         raise EvaluationProviderNotConfigured("AI answer evaluation is not configured")
     if not answer_text or not answer_text.strip():
@@ -200,6 +295,9 @@ def evaluate_answer(role: str, category: str, difficulty: str, question_text: st
         raise ValueError("question_text must not be blank")
     if len(answer_text) > MAX_TEXT_LENGTH:
         answer_text = answer_text[:MAX_TEXT_LENGTH]
+
+    if is_mock_enabled():
+        return _mock_evaluate_answer(category, answer_text)
 
     api_key = os.environ["OPENAI_API_KEY"]
     model = os.environ.get("OPENAI_MODEL", DEFAULT_MODEL)

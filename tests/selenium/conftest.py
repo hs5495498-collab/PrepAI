@@ -55,7 +55,8 @@ class BackendProcess:
             return
         env = os.environ.copy()
         env["DATABASE_PATH"] = self.db_path
-        for key in ("AI_QUESTIONS_ENABLED", "AI_EVALUATION_ENABLED", "OPENAI_API_KEY"):
+        for key in ("AI_QUESTIONS_ENABLED", "AI_EVALUATION_ENABLED", "OPENAI_API_KEY",
+                    "MOCK_EVALUATION_ENABLED", "ENVIRONMENT"):
             env.pop(key, None)
         self.proc = subprocess.Popen(
             [str(VENV_PYTHON), "-m", "uvicorn", "main:app",

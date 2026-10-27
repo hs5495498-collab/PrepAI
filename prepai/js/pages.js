@@ -1130,6 +1130,15 @@
         cap(data.category) + ' Interview — ' + esc(data.role) + '</h2>' +
         '<p class="subtle">' + cap(data.difficulty) + ' difficulty · ' + (data.status === 'completed' ? 'Completed' : 'In progress') + '</p></div>';
       out += '<div class="notice">Saved on the backend server. Any score shown is an AI-generated estimate for practice, never an objective evaluation - see each question for the full breakdown.</div>';
+      // Development-only mock evaluation mode (see backend's
+      // MOCK_EVALUATION_ENABLED): if any question below was scored by the
+      // local simulator rather than a real AI call, say so plainly here
+      // too, not just inside each question's own breakdown.
+      var anySimulated = data.questions.some(function (q) { return q.evaluation && q.evaluation.is_simulated; });
+      if (anySimulated) {
+        out += '<div class="notice" style="border-color:var(--warning);color:var(--warning)">' +
+          '<strong>SIMULATED — NOT AI-GENERATED:</strong> one or more evaluations below were produced by the local development mock evaluator, not a real AI model.</div>';
+      }
       if (overallScore != null) {
         var scoreNote = evalStatus === 'partial'
           ? 'Partially evaluated - average across ' + evaluatedCount + ' of ' + data.questions.length + ' answered question(s). The rest can still be evaluated below.'
@@ -1170,7 +1179,10 @@
   var DEFAULT_EVAL_NOTE = 'AI-generated estimate for practice purposes - not an objective or official assessment.';
   function renderEvaluation(ev) {
     function list(items) { return '<ul class="bullets">' + items.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul>'; }
-    return '<div class="score-row"><div class="big-score" style="font-size:2.5rem">' + ev.total_score + '<span>/ 100</span></div>' +
+    var simBadge = ev.is_simulated
+      ? '<div style="margin-bottom:12px"><span class="sim-badge">SIMULATED — NOT AI-GENERATED</span></div>'
+      : '';
+    return simBadge + '<div class="score-row"><div class="big-score" style="font-size:2.5rem">' + ev.total_score + '<span>/ 100</span></div>' +
       '<div class="score-meta"><p class="muted">' + esc(ev.note || DEFAULT_EVAL_NOTE) + '</p></div></div>' +
       '<div class="eval-dims">' +
         '<span><strong>' + ev.relevance_score + '</strong>/30 Relevance</span>' +

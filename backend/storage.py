@@ -51,7 +51,8 @@ def _load_session(conn: sqlite3.Connection, session_id: str) -> dict:
         "ev.correctness_score AS eval_correctness_score, ev.completeness_score AS eval_completeness_score, "
         "ev.clarity_score AS eval_clarity_score, ev.strengths AS eval_strengths, "
         "ev.weaknesses AS eval_weaknesses, ev.suggestions AS eval_suggestions, "
-        "ev.example_answer AS eval_example_answer, ev.created_at AS eval_created_at "
+        "ev.example_answer AS eval_example_answer, ev.model AS eval_model, "
+        "ev.created_at AS eval_created_at "
         "FROM questions q "
         "LEFT JOIN answers a ON a.interview_id = q.interview_id AND a.question_id = q.id "
         "LEFT JOIN evaluations ev ON ev.interview_id = q.interview_id AND ev.question_id = q.id "
@@ -72,6 +73,7 @@ def _load_session(conn: sqlite3.Connection, session_id: str) -> dict:
                 "weaknesses": json.loads(r["eval_weaknesses"]),
                 "suggestions": json.loads(r["eval_suggestions"]),
                 "example_answer": r["eval_example_answer"],
+                "model": r["eval_model"],
                 "created_at": r["eval_created_at"],
             }
         questions.append(question)

@@ -116,6 +116,9 @@ svg.icon { stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: 
 .reco-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
 .reco-secondary { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
 .reco-secondary-list { display: flex; gap: 8px; flex-wrap: wrap; }
+/* Development-only mock evaluation mode (backend MOCK_EVALUATION_ENABLED) -
+   marks a simulated (not real AI) evaluation result wherever it is shown. */
+.sim-badge { display: inline-flex; align-items: center; background: rgba(251, 191, 36, .14); color: var(--warning); font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 4px 10px; border-radius: 999px; }
 
 /* ---------- Lists ---------- */
 .list { border-top: 1px solid var(--border); }
