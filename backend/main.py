@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -49,6 +50,14 @@ EVALUATION_ERROR_MESSAGES = {
     evaluation_provider.EvaluationProviderUnavailable: "The AI evaluator is temporarily unavailable. Please try again.",
     evaluation_provider.EvaluationProviderInvalidResponse: "The AI evaluator returned an unusable response. Please try again.",
 }
+
+# Auto-evaluation-on-completion (see _auto_evaluate_session below) runs
+# each pending question's evaluation request concurrently, since each is
+# an independent, I/O-bound HTTP call to the configured provider - this
+# keeps completion latency close to one call's duration instead of
+# growing linearly with the number of answered questions, without
+# introducing a job queue or other new infrastructure.
+MAX_AUTO_EVAL_WORKERS = 4
 
 app.add_middleware(
     CORSMiddleware,
@@ -165,7 +174,34 @@ def me(user: dict = Depends(require_user)):
 
 # ---------- Interview routes ----------
 
+def _score_summary(session: dict):
+    """Returns (overall_score, evaluated_count, evaluation_status), derived
+    consistently from this session's own persisted per-question evaluations
+    every time - never stored separately, so it can never drift from them.
+
+    overall_score is the simple arithmetic mean of every answered,
+    evaluated question's total_score (each already 0-100 on an equally
+    weighted rubric - see evaluation_provider.SCORE_WEIGHTS), rounded to 1
+    decimal place; None when no answered question has a valid evaluation
+    yet - never 0, and never counting an unanswered question.
+
+    evaluation_status is "not_configured" (AI evaluation is off, so no
+    score is expected at all), "not_evaluated" (configured, but nothing
+    evaluated yet for this session), "partial" (some but not all answered
+    questions are evaluated), or "complete" (every answered question is)."""
+    answered = [q for q in session["questions"] if q["answer"] is not None and q["answer"].strip()]
+    evaluated = [q for q in answered if q["evaluation"] is not None]
+    if not evaluated:
+        overall_score = None
+        status = "not_configured" if not evaluation_provider.is_configured() else "not_evaluated"
+    else:
+        overall_score = round(sum(q["evaluation"]["total_score"] for q in evaluated) / len(evaluated), 1)
+        status = "complete" if len(evaluated) == len(answered) else "partial"
+    return overall_score, len(evaluated), status
+
+
 def _to_interview_out(session: dict, question_bank_note: Optional[str] = None) -> InterviewOut:
+    overall_score, evaluated_count, evaluation_status = _score_summary(session)
     return InterviewOut(
         session_id=session["id"],
         role=session["role"],
@@ -177,7 +213,66 @@ def _to_interview_out(session: dict, question_bank_note: Optional[str] = None) -
         answered_count=storage.answered_count(session),
         question_source=session["question_source"],
         question_bank_note=question_bank_note,
+        evaluated_count=evaluated_count,
+        overall_score=overall_score,
+        evaluation_status=evaluation_status,
     )
+
+
+def _evaluate_one_question(session: dict, question_id: str) -> dict:
+    """Core evaluation logic shared by the manual per-question endpoint
+    below and _auto_evaluate_session(). Returns the saved evaluation dict
+    (the existing one if this question was already evaluated - idempotent,
+    never re-calls the provider or creates a second row). Raises
+    storage.QuestionNotFound / storage.AnswerNotFound /
+    evaluation_provider.EvaluationProviderError exactly as the endpoint
+    used to inline - callers decide how to handle each (an HTTP error for
+    the manual endpoint, a silent skip for the best-effort auto path)."""
+    existing = storage.get_evaluation(session["id"], question_id)
+    if existing is not None:
+        return existing
+    if not evaluation_provider.is_configured():
+        raise evaluation_provider.EvaluationProviderNotConfigured("AI answer evaluation is not configured")
+    qa = storage.get_question_for_evaluation(session["id"], question_id)
+    result = evaluation_provider.evaluate_answer(
+        session["role"], session["category"], session["difficulty"],
+        qa["question_text"], qa["answer_text"],
+    )
+    return storage.save_evaluation(session["id"], question_id, result)
+
+
+def _auto_evaluate_session(session: dict) -> None:
+    """Best-effort: evaluate every answered-but-not-yet-evaluated question
+    in this session via the configured provider, concurrently (see
+    MAX_AUTO_EVAL_WORKERS). Never raises and never undoes completion - a
+    provider failure, for one question or all of them, just leaves that
+    question's evaluation missing (QuestionOut.evaluation stays None,
+    visible to the caller as a partial/not_evaluated status) and still
+    retryable later through the existing manual evaluate endpoint. A
+    no-op - and so exactly as fast as before this feature existed - when
+    evaluation_provider.is_configured() is False (the default)."""
+    if not evaluation_provider.is_configured():
+        return
+    pending_ids = [
+        q["id"] for q in session["questions"]
+        if q["answer"] is not None and q["answer"].strip() and q["evaluation"] is None
+    ]
+    if not pending_ids:
+        return
+
+    def _try_one(question_id):
+        try:
+            _evaluate_one_question(session, question_id)
+        except (storage.QuestionNotFound, storage.AnswerNotFound, evaluation_provider.EvaluationProviderError):
+            pass
+        except Exception:
+            # Defense in depth (e.g. a transient storage error under
+            # concurrent writes): this question just stays unevaluated and
+            # can be retried later - never let it crash completion.
+            pass
+
+    with ThreadPoolExecutor(max_workers=min(len(pending_ids), MAX_AUTO_EVAL_WORKERS)) as pool:
+        list(pool.map(_try_one, pending_ids))
 
 
 def _pick_fixed_questions(payload: InterviewCreateRequest, user: Optional[dict]):
@@ -296,6 +391,14 @@ def complete_interview(session_id: str, request: Request, user: Optional[dict] =
         session = storage.complete_session(session_id)
     except storage.AlreadyCompleted:
         raise HTTPException(status_code=409, detail="This interview is already completed.")
+
+    # Default evaluation: best-effort, never blocks or undoes completion -
+    # see _auto_evaluate_session's docstring. Reload afterward to pick up
+    # whatever got evaluated (or didn't) before computing the summary.
+    _auto_evaluate_session(session)
+    session = storage.get_session(session_id)
+
+    overall_score, evaluated_count, evaluation_status = _score_summary(session)
     return CompletionResponse(
         session_id=session["id"],
         role=session["role"],
@@ -306,6 +409,9 @@ def complete_interview(session_id: str, request: Request, user: Optional[dict] =
         answered_count=storage.answered_count(session),
         total_questions=len(session["questions"]),
         question_source=session["question_source"],
+        evaluated_count=evaluated_count,
+        overall_score=overall_score,
+        evaluation_status=evaluation_status,
     )
 
 
@@ -319,33 +425,15 @@ def evaluate_answer(session_id: str, question_id: str, request: Request, user: O
         raise HTTPException(status_code=404, detail="Interview session not found.")
     _check_ownership(session, user)
 
-    # Idempotent: a question that was already evaluated returns that same
-    # stored result - this never re-calls the AI provider or creates a
-    # second row, so a retried request can never double-bill.
-    existing = storage.get_evaluation(session_id, question_id)
-    if existing is not None:
-        return EvaluationOut(session_id=session_id, **existing)
-
-    if not evaluation_provider.is_configured():
-        raise HTTPException(status_code=503, detail="AI answer evaluation is not configured on this server.")
-
     try:
-        qa = storage.get_question_for_evaluation(session_id, question_id)
+        saved = _evaluate_one_question(session, question_id)
     except storage.QuestionNotFound:
         raise HTTPException(status_code=404, detail="Question not found in this interview session.")
     except storage.AnswerNotFound:
         raise HTTPException(status_code=409, detail="This question has not been answered yet, so it cannot be evaluated.")
-
-    try:
-        result = evaluation_provider.evaluate_answer(
-            session["role"], session["category"], session["difficulty"],
-            qa["question_text"], qa["answer_text"],
-        )
     except evaluation_provider.EvaluationProviderError as exc:
         message = EVALUATION_ERROR_MESSAGES.get(type(exc), "AI answer evaluation is currently unavailable.")
         raise HTTPException(status_code=503, detail=message)
-
-    saved = storage.save_evaluation(session_id, question_id, result)
     return EvaluationOut(session_id=session_id, **saved)
 
 

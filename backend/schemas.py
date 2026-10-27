@@ -4,6 +4,11 @@ from pydantic import BaseModel, Field, field_validator
 
 Category = Literal["technical", "hr", "behavioral"]
 Difficulty = Literal["easy", "medium", "hard"]
+# "not_configured": AI evaluation is off, so no score is expected at all.
+# "not_evaluated": configured, but nothing evaluated yet for this session.
+# "partial": some but not all answered questions are evaluated.
+# "complete": every answered question has a valid evaluation.
+EvaluationStatus = Literal["not_configured", "not_evaluated", "partial", "complete"]
 
 
 class RegisterRequest(BaseModel):
@@ -60,6 +65,14 @@ class InterviewOut(BaseModel):
     answered_count: int
     question_source: Literal["fixed", "ai"] = "fixed"
     question_bank_note: Optional[str] = None
+    # Derived every time from this session's own persisted per-question
+    # evaluations (see main.py's _score_summary) - never stored separately,
+    # so it can never drift from them. overall_score is the mean of every
+    # answered, evaluated question's total_score, or None when nothing is
+    # evaluated yet - never a fabricated or zero-substituted score.
+    evaluated_count: int = 0
+    overall_score: Optional[float] = None
+    evaluation_status: EvaluationStatus = "not_configured"
 
 
 class AnswerRequest(BaseModel):
@@ -92,6 +105,9 @@ class CompletionResponse(BaseModel):
     answered_count: int
     total_questions: int
     question_source: Literal["fixed", "ai"] = "fixed"
+    evaluated_count: int = 0
+    overall_score: Optional[float] = None
+    evaluation_status: EvaluationStatus = "not_configured"
 
 
 class EvaluationOut(BaseModel):
