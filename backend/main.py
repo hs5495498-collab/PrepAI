@@ -1,4 +1,6 @@
+import os
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -7,7 +9,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse
 
-load_dotenv()
+def env_file_path() -> Path:
+    """backend/.env, resolved as an absolute path next to this file -
+    never relative to the current working directory. load_dotenv() with
+    no path argument instead searches upward from the process's *working*
+    directory, which only finds this file when launched with backend/ as
+    the cwd (the one documented launch pattern) - launched from anywhere
+    else (e.g. the repo root), it silently finds nothing: no error, no
+    warning, indistinguishable from AI evaluation genuinely being
+    unconfigured. An absolute path makes loading reliable regardless of
+    how/where the process was started."""
+    return Path(__file__).resolve().parent / ".env"
+
+
+load_dotenv(dotenv_path=env_file_path())
+
+from contextlib import asynccontextmanager
 
 import ai_provider
 import analytics
@@ -31,7 +48,38 @@ from schemas import (
     UserOut,
 )
 
-app = FastAPI(title="PrepAI Backend")
+
+def _log_ai_feature_status(label: str, flag_name: str, provider_module) -> None:
+    """One safe, human-readable startup line per AI feature's actual
+    configuration state - enabled/disabled/misconfigured - and never the
+    API key itself, just whether it's present. Printed with the exact
+    flag name so a developer can immediately tell whether backend/.env
+    was even found (see load_dotenv() above) without guessing."""
+    flag_on = os.environ.get(flag_name, "false").strip().lower() == "true"
+    key_present = bool(os.environ.get("OPENAI_API_KEY"))
+    # flush=True: stdout is fully buffered (not line-buffered) when it isn't
+    # a terminal - e.g. redirected to a log file, as uvicorn's own output
+    # often is - so without this, the diagnostic can sit in a buffer and
+    # never actually appear, defeating the entire point of a startup check.
+    if provider_module.is_configured():
+        model = os.environ.get("OPENAI_MODEL", provider_module.DEFAULT_MODEL)
+        print(f"[PrepAI] {label}: ENABLED (model={model})", flush=True)
+    elif flag_on and not key_present:
+        print(f"[PrepAI] {label}: {flag_name}=true but OPENAI_API_KEY is missing - requests will be rejected until it is set.", flush=True)
+    elif flag_on:
+        print(f"[PrepAI] {label}: {flag_name}=true and OPENAI_API_KEY is set, but is_configured() still says no - check for a typo in the flag value.", flush=True)
+    else:
+        print(f"[PrepAI] {label}: disabled ({flag_name} is not \"true\"). Set it and OPENAI_API_KEY in backend/.env, then restart, to enable.", flush=True)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    _log_ai_feature_status("AI question generation", "AI_QUESTIONS_ENABLED", ai_provider)
+    _log_ai_feature_status("AI answer evaluation", "AI_EVALUATION_ENABLED", evaluation_provider)
+    yield
+
+
+app = FastAPI(title="PrepAI Backend", lifespan=lifespan)
 
 AI_ERROR_MESSAGES = {
     ai_provider.AIProviderNotConfigured: "AI question generation is not configured on this server.",
@@ -43,7 +91,10 @@ AI_ERROR_MESSAGES = {
 }
 
 EVALUATION_ERROR_MESSAGES = {
-    evaluation_provider.EvaluationProviderNotConfigured: "AI answer evaluation is not configured on this server.",
+    evaluation_provider.EvaluationProviderNotConfigured: (
+        "AI answer evaluation is not configured on this server. To enable it, set "
+        "AI_EVALUATION_ENABLED=true and OPENAI_API_KEY in backend/.env, then restart the backend."
+    ),
     evaluation_provider.EvaluationProviderTimeout: "The AI evaluator took too long to respond. Please try again.",
     evaluation_provider.EvaluationProviderAuthError: "The AI evaluator is misconfigured on this server.",
     evaluation_provider.EvaluationProviderRateLimited: "The AI evaluator is temporarily busy. Please try again shortly.",

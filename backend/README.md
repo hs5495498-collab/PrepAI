@@ -146,8 +146,25 @@ AI_EVALUATION_ENABLED=true
 
 in your `.env` (reuses the same `OPENAI_API_KEY`/`OPENAI_MODEL` as question
 generation - no separate key needed). Leaving it unset (the default) means
-every evaluation request gets a clear `503 AI answer evaluation is not
-configured on this server.` - never a silent failure, never a fake score.
+every evaluation request gets a clear, actionable `503` - naming exactly
+which two settings to set and where - never a silent failure, never a
+fake score.
+
+`.env` must live at `backend/.env` (next to `main.py`) - it is loaded by
+an absolute path resolved from `main.py`'s own location
+(`main.env_file_path()`), not by searching from whatever directory the
+process happens to be launched from, so it loads reliably even if you
+start `uvicorn` from the repository root instead of `backend/`.
+
+**Startup diagnostic**: every time the backend starts, it prints one line
+per AI feature to the console - `ENABLED (model=...)`, `disabled (...)`,
+or `<FLAG>=true but OPENAI_API_KEY is missing` - so you can immediately
+confirm from the terminal whether your `.env` was actually found and
+parsed correctly, without ever printing the key itself:
+```
+[PrepAI] AI question generation: disabled (AI_QUESTIONS_ENABLED is not "true"). Set it and OPENAI_API_KEY in backend/.env, then restart, to enable.
+[PrepAI] AI answer evaluation: ENABLED (model=gpt-4o-mini)
+```
 
 ### The scoring rubric
 
