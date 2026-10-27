@@ -239,6 +239,17 @@ class TestAccountAndInterviewFlow:
         local_section = driver.find_element(By.XPATH, "//h3[text()='Local Browser History (This Device Only)']")
         assert local_section.is_displayed()
 
+        # Regression test: the Local Browser History table's Score column
+        # must never show a raw demoScore() number in the same row where
+        # the Result column honestly says "Not evaluated" - the interview
+        # completed in test_11-13 has no real evaluation (AI is disabled
+        # in this suite), so its row's Score and Result cells must agree.
+        first_row = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "#rows tr")))
+        score_cell = first_row.find_element(By.CSS_SELECTOR, "[data-label='Score']")
+        result_cell = first_row.find_element(By.CSS_SELECTOR, "[data-label='Result']")
+        assert score_cell.text.strip() == "Not evaluated"
+        assert "Not evaluated" in result_cell.text
+
     def test_15_analytics_and_recommendations_render(self, driver, wait, frontend_url):
         goto(driver, frontend_url, "analytics.html")
         analytics_body = wait.until(EC.visibility_of_element_located((By.ID, "account-analytics-body")))

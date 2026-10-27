@@ -608,10 +608,20 @@
   };
 
   /* ---------------- 3. Interview history ---------------- */
+  function scoreCellText(a) {
+    // Same reasoning as resultHTML()/changeForDisplay(): a live attempt's
+    // score is a word-count heuristic, not a real evaluation - the Score
+    // column must never show a number right next to a Result column that
+    // honestly says "Not evaluated" for the very same row.
+    if (P.isLiveAttempt(a)) return 'Not evaluated';
+    return a.score != null ? a.score : '—';
+  }
   pages.history = function () {
     var state = { range: 'all', type: 'all', shown: 6 };
     var c = P.completed();
-    $('#summary').textContent = 'Latest score ' + c[c.length - 1].score + ' · ' + c.length + ' completed attempts';
+    var latest = c[c.length - 1];
+    var latestScoreText = P.isLiveAttempt(latest) ? 'Not evaluated' : latest.score;
+    $('#summary').textContent = 'Latest score ' + latestScoreText + ' · ' + c.length + ' completed attempts';
 
     function filtered() {
       var cut = null;
@@ -627,7 +637,7 @@
         return '<tr' + (clickable ? ' data-href="results.html?id=' + a.id + '"' : '') + '>' +
           '<td data-label="Date">' + P.fmt(a.date, true) + '</td>' +
           '<td data-label="Type">' + a.type + '</td>' +
-          '<td data-label="Score">' + (a.score != null ? a.score : '—') + '</td>' +
+          '<td data-label="Score">' + scoreCellText(a) + '</td>' +
           '<td data-label="Result">' + resultHTML(a) + '</td>' +
           '<td data-label="Change">' + changeHTML(changeForDisplay(a)) + '</td>' +
           '<td>' + (clickable
