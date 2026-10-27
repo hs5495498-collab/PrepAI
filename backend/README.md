@@ -32,7 +32,11 @@ data directly - also no AI calls, just database queries and arithmetic.
 - `POST /api/interviews/{session_id}/answers` - submit one answer. Called
   once per question as you move past it in `practice.html`.
 - `POST /api/interviews/{session_id}/complete` - mark a session completed.
-  Called when you click "Finish Interview" on the last question.
+  Called when you click "Finish Interview" on the last question. Also
+  automatically evaluates every answered question through the configured
+  AI evaluation provider (if enabled) and returns an `overall_score` out
+  of 100, `evaluated_count`, and `evaluation_status` - see "AI answer
+  evaluation" below.
 - `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`,
   `GET /api/auth/me` - account creation and sessions (Phase 7, see below).
 - `POST /api/interviews/{session_id}/questions/{question_id}/evaluate` -
@@ -130,7 +134,7 @@ generation) - different file, different feature flag, different endpoint.
 | | Question generation (Phase 5) | Answer evaluation (Phase 8) |
 |---|---|---|
 | Flag | `AI_QUESTIONS_ENABLED` | `AI_EVALUATION_ENABLED` |
-| When it runs | Once, when you click "Start Interview" | On demand, when you click "Evaluate with AI" on the results page |
+| When it runs | Once, when you click "Start Interview" | Automatically for every answered question when you complete an interview (see below), and on demand afterward via "Evaluate with AI" on the results page for anything that didn't get evaluated yet |
 | What it sends the provider | Role/category/difficulty/count | Role/category/difficulty + the one question + your one answer |
 | What it returns | A list of question strings | A score breakdown + written feedback for one answer |
 
@@ -206,6 +210,37 @@ returns the **same stored result** - the provider is never called twice
 for the same question, and no duplicate row is ever created. There is
 currently no "re-evaluate" or "regenerate" action; the first successful
 evaluation is permanent for that question.
+
+### Automatic evaluation on interview completion, and the overall score
+
+`POST /api/interviews/{session_id}/complete` automatically evaluates every
+answered question that doesn't have a valid evaluation yet, when
+`AI_EVALUATION_ENABLED` is on - you no longer have to click "Evaluate with
+AI" on each question individually just to get a scored interview. This
+reuses the exact same per-question logic as the manual endpoint (same
+validation, same idempotency, same provider), run concurrently across up
+to 4 questions at once (`main.MAX_AUTO_EVAL_WORKERS`) to keep completion
+latency reasonable for a multi-question interview instead of growing
+linearly with the question count. **When `AI_EVALUATION_ENABLED` is off
+(the default), this is a complete no-op** - completion is exactly as fast
+as it always was.
+
+A provider failure for one question, or all of them, **never fails
+completion itself** - the interview is still marked completed, the
+submitted answers are untouched, and whichever questions couldn't be
+evaluated just stay unevaluated and remain retryable later through the
+same manual "Evaluate with AI" button. Both the completion response and
+`GET /api/interviews/{session_id}` now include:
+
+| Field | Meaning |
+|---|---|
+| `overall_score` | The simple mean of every answered, evaluated question's `total_score` (each already 0-100), rounded to 1 decimal place - `null` (never `0`) when nothing has a valid evaluation yet. Derived fresh from the persisted per-question evaluations on every request, never stored separately, so it can never drift from them. |
+| `evaluated_count` | How many answered questions have a valid evaluation right now. |
+| `evaluation_status` | `"not_configured"` (AI evaluation is off), `"not_evaluated"` (configured, but nothing evaluated yet for this session), `"partial"` (some but not all answered questions are evaluated), or `"complete"` (every answered question is). |
+
+Refreshing the results page, or any other `GET`, never re-triggers
+evaluation or re-calls the provider - only a `POST .../complete` (once,
+the first time) or an explicit `POST .../evaluate` call does.
 
 ## Personalized recommendations (Phase 9)
 
