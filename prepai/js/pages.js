@@ -312,7 +312,7 @@
     function finish() {
       if (!window.confirm('Finish the interview and view your results? You will not be able to change your answers after this.')) return;
       if (!backendId) { finishOffline(); return; }
-      setBusy(true, 'Finishing your interview…');
+      setBusy(true, 'Finishing your interview… this may take a little longer if AI evaluation is enabled.');
       window.PREP_API.completeInterview(backendId).then(function (res) {
         if (res.ok) { finishFromBackend(res.data); return; }
         // Already completed (a rare double-submit race), expired, or unreachable:
@@ -1108,20 +1108,30 @@
         return;
       }
       var data = res.data;
-      var evaluated = data.questions.filter(function (q) { return q.evaluation; });
-      var avg = evaluated.length
-        ? Math.round(evaluated.reduce(function (s, q) { return s + q.evaluation.total_score; }, 0) / evaluated.length * 10) / 10
-        : null;
+      // Server-authoritative (backend/main.py's _score_summary) - derived
+      // consistently from this session's own persisted per-question
+      // evaluations every time, the same figures History/Dashboard/
+      // Analytics use, so this never re-derives its own (potentially
+      // inconsistent) average from data.questions client-side.
+      var overallScore = data.overall_score;
+      var evaluatedCount = data.evaluated_count || 0;
+      var evalStatus = data.evaluation_status || 'not_configured';
       var out = '<div><div class="eyebrow">Interview Results</div><h2 class="page-heading" style="margin-top:6px">' +
         cap(data.category) + ' Interview — ' + esc(data.role) + '</h2>' +
         '<p class="subtle">' + cap(data.difficulty) + ' difficulty · ' + (data.status === 'completed' ? 'Completed' : 'In progress') + '</p></div>';
       out += '<div class="notice">Saved on the backend server. Any score shown is an AI-generated estimate for practice, never an objective evaluation - see each question for the full breakdown.</div>';
-      if (avg != null) {
-        out += '<div class="score-row"><div class="big-score">' + avg + '<span>/ 100 average</span></div>' +
-          '<div class="score-meta"><p class="muted">Average across ' + evaluated.length + ' of ' + data.questions.length + ' evaluated question(s)</p></div></div>';
+      if (overallScore != null) {
+        var scoreNote = evalStatus === 'partial'
+          ? 'Partially evaluated - average across ' + evaluatedCount + ' of ' + data.questions.length + ' answered question(s). The rest can still be evaluated below.'
+          : 'Average across ' + evaluatedCount + ' of ' + data.questions.length + ' evaluated question(s)';
+        out += '<div class="score-row"><div class="big-score">' + overallScore + '<span>/ 100 average</span></div>' +
+          '<div class="score-meta"><p class="muted">' + scoreNote + '</p></div></div>';
       } else {
+        var emptyNote = evalStatus === 'not_configured'
+          ? 'AI evaluation is not configured on this server. Use “Evaluate with AI” below to see the exact reason, or ask the operator to enable it.'
+          : 'Use “Evaluate with AI” on a question below for a real, AI-generated score - or if that’s unavailable, it\'ll say why.';
         out += '<div class="score-row"><div class="score-meta"><span class="res res-incomplete">Not evaluated yet</span>' +
-          '<p class="muted">Use “Evaluate with AI” on a question below for a real, AI-generated score - or if that’s unavailable, it\'ll say why.</p></div></div>';
+          '<p class="muted">' + emptyNote + '</p></div></div>';
       }
       out += '<div><h3 class="section-title">Questions &amp; Answers</h3><div class="qa-list">' +
         data.questions.map(function (q, i) {

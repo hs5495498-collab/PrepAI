@@ -60,7 +60,14 @@
     createInterview: function (payload) { return postJSON('/api/interviews', payload); },
     getInterview: function (sessionId) { return request('/api/interviews/' + encodeURIComponent(sessionId)); },
     submitAnswer: function (sessionId, payload) { return postJSON('/api/interviews/' + encodeURIComponent(sessionId) + '/answers', payload); },
-    completeInterview: function (sessionId) { return postJSON('/api/interviews/' + encodeURIComponent(sessionId) + '/complete', {}); },
+    // Completing an interview now also attempts to evaluate every answered
+    // question through the configured AI provider (see backend/main.py's
+    // _auto_evaluate_session) before responding, run concurrently server-
+    // side but still potentially several real provider calls - 90s instead
+    // of the default 5s, so a real-but-slow (fully evaluated) response is
+    // never wrongly reported as "backend unreachable". A true no-op (same
+    // speed as before) whenever AI evaluation is disabled, the default.
+    completeInterview: function (sessionId) { return postJSON('/api/interviews/' + encodeURIComponent(sessionId) + '/complete', {}, 90000); },
     register: function (email, password) { return postJSON('/api/auth/register', { email: email, password: password }); },
     login: function (email, password) { return postJSON('/api/auth/login', { email: email, password: password }); },
     logout: function () { return postJSON('/api/auth/logout', {}); },
