@@ -34,10 +34,14 @@ def create_interview(client, category="technical", difficulty="medium", question
 
 
 def complete_with_evaluation(client, monkeypatch, total_score, category="technical", **headers):
+    """Mocks AI evaluation on *before* completing, so the real auto-
+    evaluation-on-completion path (main.py's _auto_evaluate_session) does
+    the evaluating - then reverts is_configured to False immediately
+    after, so a later plain create+complete call sharing this same
+    monkeypatch fixture is never affected by this mock leaking forward."""
     created = create_interview(client, category=category, question_count=1, **headers).json()
     session_id, question_id = created["session_id"], created["questions"][0]["id"]
     client.post(f"/api/interviews/{session_id}/answers", json={"question_id": question_id, "answer": "An answer."}, headers=headers)
-    client.post(f"/api/interviews/{session_id}/complete", headers=headers)
 
     def fake_evaluate(role, cat, diff, question_text, answer_text):
         return {
@@ -49,7 +53,8 @@ def complete_with_evaluation(client, monkeypatch, total_score, category="technic
 
     monkeypatch.setattr(main.evaluation_provider, "is_configured", lambda: True)
     monkeypatch.setattr(main.evaluation_provider, "evaluate_answer", fake_evaluate)
-    client.post(f"/api/interviews/{session_id}/questions/{question_id}/evaluate", headers=headers)
+    client.post(f"/api/interviews/{session_id}/complete", headers=headers)
+    monkeypatch.setattr(main.evaluation_provider, "is_configured", lambda: False)
     return session_id, question_id
 
 
