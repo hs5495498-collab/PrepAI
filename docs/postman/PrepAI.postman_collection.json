@@ -1,0 +1,996 @@
+{
+  "info": {
+    "_postman_id": "361c5719-0610-4311-8454-21799e5c58d5",
+    "name": "PrepAI Backend API",
+    "description": "Verification collection for the PrepAI FastAPI backend, built directly from the live OpenAPI schema (GET /openapi.json) and backend/auth.py's actual cookie/header names - no invented endpoints, fields, or auth mechanics. Uses dedicated, dynamically-generated test accounts (postman-a-*/postman-b-*@example.com) - never your real account. Run top-to-bottom, folder order matters (later requests depend on variables captured by earlier ones). See docs/postman/README.md.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Health",
+      "item": [
+        {
+          "name": "1.1 Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"status: ok\", () => pm.expect(pm.response.json().status).to.eql(\"ok\"));",
+                  ""
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Account & Session (Account A)",
+      "item": [
+        {
+          "name": "2.1 Register Test Account A",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "register"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{test_email_a}}\",\n  \"password\": \"{{test_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get('test_email_a')) {",
+                  "  pm.collectionVariables.set('test_email_a', 'postman-a-' + Date.now() + '@example.com');",
+                  "}",
+                  ""
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"Returned email matches\", () => pm.expect(pm.response.json().email).to.eql(pm.collectionVariables.get('test_email_a')));",
+                  "pm.collectionVariables.set('csrf_token_a', pm.cookies.get('prepai_csrf'));",
+                  "pm.collectionVariables.set('session_cookie_a', pm.cookies.get('prepai_session'));",
+                  "pm.test(\"Session and CSRF cookies were set\", () => {",
+                  "  pm.expect(pm.collectionVariables.get('csrf_token_a')).to.be.a('string').and.not.empty;",
+                  "  pm.expect(pm.collectionVariables.get('session_cookie_a')).to.be.a('string').and.not.empty;",
+                  "});",
+                  ""
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2.2 Get Current Account (Me)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "me"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"email matches registered account\", () => pm.expect(pm.response.json().email).to.eql(pm.collectionVariables.get('test_email_a')));",
+                  "pm.test(\"response never includes a password field\", () => pm.expect(pm.response.json()).to.not.have.property('password'));",
+                  ""
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2.3 Logout Account A",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token_a}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "logout"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  ""
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2.4 Login Account A (re-establish session)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{test_email_a}}\",\n  \"password\": \"{{test_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('csrf_token_a', pm.cookies.get('prepai_csrf'));",
+                  "pm.collectionVariables.set('session_cookie_a', pm.cookies.get('prepai_session'));",
+                  "pm.test(\"Login retains a fresh session + CSRF cookie\", () => {",
+                  "  pm.expect(pm.collectionVariables.get('csrf_token_a')).to.be.a('string').and.not.empty;",
+                  "  pm.expect(pm.collectionVariables.get('session_cookie_a')).to.be.a('string').and.not.empty;",
+                  "});",
+                  ""
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Interview Lifecycle (Account A)",
+      "item": [
+        {
+          "name": "3.1 Create Interview",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token_a}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/interviews",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "interviews"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"Backend Developer (Postman Test)\",\n  \"category\": \"technical\",\n  \"difficulty\": \"easy\",\n  \"question_count\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 201\", () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"total_questions matches request\", () => pm.expect(body.total_questions).to.eql(3));",
+                  "pm.test(\"status is in_progress\", () => pm.expect(body.status).to.eql(\"in_progress\"));",
+                  "pm.collectionVariables.set('session_id', body.session_id);",
+                  "pm.collectionVariables.set('question_id', body.questions[0].id);",
+                  "pm.test(\"session_id and first question_id captured\", () => {",
+                  "  pm.expect(pm.collectionVariables.get('session_id')).to.be.a('string').and.not.empty;",
+                  "  pm.expect(pm.collectionVariables.get('question_id')).to.be.a('string').and.not.empty;",
+                  "});",
+                  ""
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.2 Retrieve Interview Session & Questions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/interviews/{{session_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "interviews",
+                "{{session_id}}"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"session_id matches\", () => pm.expect(body.session_id).to.eql(pm.collectionVariables.get('session_id')));",
+                  "pm.test(\"has 3 questions\", () => pm.expect(body.questions.length).to.eql(3));",
+                  ""
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.3 Submit Answer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token_a}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/interviews/{{session_id}}/answers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "interviews",
+                "{{session_id}}",
+                "answers"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question_id\": \"{{question_id}}\",\n  \"answer\": \"A real, substantive Postman test answer about this question.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"answered_count is 1\", () => pm.expect(pm.response.json().answered_count).to.eql(1));",
+                  ""
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.4 Verify Saved Answer",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/interviews/{{session_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "interviews",
+                "{{session_id}}"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const q = body.questions.find(q => q.id === pm.collectionVariables.get('question_id'));",
+                  "pm.test(\"the submitted answer was actually persisted\", () => {",
+                  "  pm.expect(q).to.not.be.undefined;",
+                  "  pm.expect(q.answer).to.eql(\"A real, substantive Postman test answer about this question.\");",
+                  "});",
+                  ""
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.5 Complete Interview",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token_a}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/interviews/{{session_id}}/complete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "interviews",
+                "{{session_id}}",
+                "complete"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200 (or 409 if this request was already run once)\", () => {",
+                  "  pm.expect([200, 409]).to.include(pm.response.code);",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "  const body = pm.response.json();",
+                  "  pm.test(\"status is completed\", () => pm.expect(body.status).to.eql(\"completed\"));",
+                  "  pm.test(\"evaluation_status is one of the documented values\", () => {",
+                  "    pm.expect([\"not_configured\", \"not_evaluated\", \"partial\", \"complete\"]).to.include(body.evaluation_status);",
+                  "  });",
+                  "  pm.test(\"overall_score is never 0 as a substitute for missing evaluation\", () => {",
+                  "    if (body.evaluated_count === 0) { pm.expect(body.overall_score).to.be.null; }",
+                  "  });",
+                  "}",
+                  ""
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3.6 Retrieve Final Results",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/interviews/{{session_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "interviews",
+                "{{session_id}}"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"session is completed\", () => pm.expect(body.status).to.eql(\"completed\"));",
+                  "pm.test(\"evaluation_status is honestly reported\", () => {",
+                  "  pm.expect([\"not_configured\", \"not_evaluated\", \"partial\", \"complete\"]).to.include(body.evaluation_status);",
+                  "});",
+                  "console.log(\"Evaluation status for this run:\", body.evaluation_status, \"| overall_score:\", body.overall_score);",
+                  ""
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. History, Analytics & Recommendations (Account A)",
+      "item": [
+        {
+          "name": "4.1 Interview History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/interviews?limit=20&offset=0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "interviews?limit=20&offset=0"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"the completed interview appears in history\", () => {",
+                  "  const ids = body.interviews.map(i => i.session_id);",
+                  "  pm.expect(ids).to.include(pm.collectionVariables.get('session_id'));",
+                  "});",
+                  ""
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.2 Account Analytics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"total_interviews reflects the real completed interview\", () => pm.expect(body.total_interviews).to.be.at.least(1));",
+                  "pm.test(\"average_score is never 0 when evaluated_answers is 0\", () => {",
+                  "  if (body.evaluated_answers === 0) { pm.expect(body.average_score).to.be.null; }",
+                  "});",
+                  ""
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.3 Recommendations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/recommendations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "recommendations"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"recommendations array is present\", () => pm.expect(pm.response.json().recommendations).to.be.an('array'));",
+                  ""
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5. AI Evaluation (honest check - works whether configured or not)",
+      "item": [
+        {
+          "name": "5.1 Evaluate Answer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token_a}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/interviews/{{session_id}}/questions/{{question_id}}/evaluate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "interviews",
+                "{{session_id}}",
+                "questions",
+                "{{question_id}}",
+                "evaluate"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// This request intentionally branches on the server's actual configuration",
+                  "// instead of presuming AI evaluation is on or off - see docs/postman/README.md.",
+                  "if (pm.response.code === 200) {",
+                  "  const body = pm.response.json();",
+                  "  pm.test(\"[CONFIGURED] total_score is within 0-100\", () => {",
+                  "    pm.expect(body.total_score).to.be.at.least(0).and.at.most(100);",
+                  "  });",
+                  "  pm.test(\"[CONFIGURED] note discloses this is an estimate, not an objective measurement\", () => {",
+                  "    pm.expect(body.note.toLowerCase()).to.include(\"estimate\");",
+                  "  });",
+                  "  console.log(\"AI evaluation is CONFIGURED on this server - real provider call occurred for this request.\");",
+                  "} else {",
+                  "  pm.test(\"[NOT CONFIGURED] honest 503 with a clear reason, never a fabricated score\", () => {",
+                  "    pm.response.to.have.status(503);",
+                  "    pm.expect(pm.response.json().detail.toLowerCase()).to.include(\"not configured\");",
+                  "  });",
+                  "  console.log(\"AI evaluation is NOT configured on this server - honest 503 confirmed, no score fabricated.\");",
+                  "}",
+                  ""
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "6. Security - Ownership, CSRF & Validation",
+      "item": [
+        {
+          "name": "6.1 Register Test Account B",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "register"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{test_email_b}}\",\n  \"password\": \"{{test_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get('test_email_b')) {",
+                  "  pm.collectionVariables.set('test_email_b', 'postman-b-' + Date.now() + '@example.com');",
+                  "}",
+                  ""
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('csrf_token_b', pm.cookies.get('prepai_csrf'));",
+                  "pm.collectionVariables.set('session_cookie_b', pm.cookies.get('prepai_session'));",
+                  ""
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.2 Account B Cannot Read Account A's Interview",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "prepai_session={{session_cookie_b}}; prepai_csrf={{csrf_token_b}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/interviews/{{session_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "interviews",
+                "{{session_id}}"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 404 (never reveals that the interview exists)\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"no private fields (role, questions, answers) leaked alongside the error\", () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.not.have.property('role');",
+                  "  pm.expect(body).to.not.have.property('questions');",
+                  "});",
+                  ""
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.3 Missing CSRF Token Is Rejected",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "prepai_session={{session_cookie_b}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "logout"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 403 - an authenticated state-changing request with no X-CSRF-Token header is rejected\", () => {",
+                  "  pm.response.to.have.status(403);",
+                  "});",
+                  ""
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.4 Invalid Category Is Rejected",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token_b}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "prepai_session={{session_cookie_b}}; prepai_csrf={{csrf_token_b}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/interviews",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "interviews"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"Tester\",\n  \"category\": \"not-a-real-category\",\n  \"difficulty\": \"easy\",\n  \"question_count\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 422 - schema rejects an unsupported category value\", () => pm.response.to.have.status(422));",
+                  ""
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.5 Weak Password Is Rejected",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "register"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"postman-weakpass-{{$timestamp}}@example.com\",\n  \"password\": \"short\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 422 - password below the 8-character minimum is rejected\", () => pm.response.to.have.status(422));",
+                  ""
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.6 Recommendations Without Authentication",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/recommendations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "recommendations"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 401 - recommendations require a real signed-in account, no anonymous equivalent\", () => {",
+                  "  pm.response.to.have.status(401);",
+                  "});",
+                  ""
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8000",
+      "type": "string"
+    },
+    {
+      "key": "test_email_a",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "test_email_b",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "csrf_token_a",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "session_cookie_a",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "csrf_token_b",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "session_cookie_b",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "session_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "question_id",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}
